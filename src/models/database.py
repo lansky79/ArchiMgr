@@ -1,28 +1,36 @@
 import sqlite3
 import logging
 import os
+import sys
 
 class Database:
     def __init__(self):
-        # 数据库路径在 database 目录
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.db_path = os.path.join(project_root, 'database', 'personnel.db')
+        if getattr(sys, 'frozen', False):
+            # PyInstaller 打包后的路径
+            application_path = os.path.dirname(sys.executable)
+        else:
+            # 开发环境路径
+            application_path = os.path.dirname(os.path.abspath(__file__))
+            
+        # 确保数据库目录存在
+        db_dir = os.path.join(application_path, 'database')
+        if not os.path.exists(db_dir):
+            os.makedirs(db_dir)
+            
+        self.db_file = os.path.join(db_dir, 'archimgr.db')
         self.conn = None
         self.cursor = None
         
     def connect(self):
         try:
-            # 确保 database 目录存在
-            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-            
             # 连接数据库
-            self.conn = sqlite3.connect(self.db_path)
+            self.conn = sqlite3.connect(self.db_file)
             self.cursor = self.conn.cursor()
             
             # 创建表
             self._create_tables()
             
-            logging.info(f"数据库连接成功: {self.db_path}")
+            logging.info(f"数据库连接成功: {self.db_file}")
         except Exception as e:
             logging.error(f"数据库连接失败: {e}")
             raise
