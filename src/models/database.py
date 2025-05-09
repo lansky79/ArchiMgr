@@ -5,34 +5,27 @@ import sys
 
 class Database:
     def __init__(self):
-        if getattr(sys, 'frozen', False):
-            # PyInstaller 打包后的路径
-            application_path = os.path.dirname(sys.executable)
-        else:
-            # 开发环境路径
-            application_path = os.path.dirname(os.path.abspath(__file__))
-            
-        # 确保数据库目录存在
-        db_dir = os.path.join(application_path, 'database')
-        if not os.path.exists(db_dir):
-            os.makedirs(db_dir)
-            
-        self.db_file = os.path.join(db_dir, 'archimgr.db')
-        self.conn = None
-        self.cursor = None
+        """初始化数据库连接"""
+        self.db_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            'database',
+            'archimgr.db'
+        )
         
-    def connect(self):
+        # 确保数据库目录存在
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        
+        # 建立数据库连接
         try:
-            # 连接数据库
-            self.conn = sqlite3.connect(self.db_file)
+            self.conn = sqlite3.connect(self.db_path)
             self.cursor = self.conn.cursor()
             
-            # 创建表
+            # 创建必要的表
             self._create_tables()
             
-            logging.info(f"数据库连接成功: {self.db_file}")
+            logging.info(f"数据库连接成功: {self.db_path}")
         except Exception as e:
-            logging.error(f"数据库连接失败: {e}")
+            logging.error(f"数据库连接失败: {str(e)}", exc_info=True)
             raise
     
     def _create_tables(self):

@@ -3,22 +3,81 @@ from tkinter import ttk
 import logging
 import shutil
 import os
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 import pandas as pd
 import subprocess
 import sys
+import re
+import time
+import json
+import hashlib
 
 class MainWindow:
     def __init__(self, root, db=None):
         self.root = root
         self.db = db
         
-        # 设置日志级别为 DEBUG
-        logging.getLogger().setLevel(logging.DEBUG)
+        # 设置日志级别和格式
+        logger = logging.getLogger()
+        logger.setLevel(logging.DEBUG)
+        
+        # 确保至少有一个处理器，否则添加一个
+        if not logger.handlers:
+            # 创建控制台处理器
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.DEBUG)
+            
+            # 设置日志格式
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+            console_handler.setFormatter(formatter)
+            
+            # 添加处理器到日志记录器
+            logger.addHandler(console_handler)
+            
+            # 添加文件处理器
+            log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'logs')
+            os.makedirs(log_dir, exist_ok=True)
+            log_file = os.path.join(log_dir, f"debug_{time.strftime('%Y%m%d')}.log")
+            
+            file_handler = logging.FileHandler(log_file, encoding='utf-8')
+            file_handler.setLevel(logging.DEBUG)
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+            
+            logging.info("初始化日志系统完成")
+        
+        logging.info("=== 档案管理系统启动 ===")
+        
+        # 获取版本信息
+        self.version = self.get_version()
+        logging.info(f"系统版本: {self.version}")
         
         # 初始化文件列表和分类映射
         self.all_files = []
         self.category_mapping = {}
+        
+        # 用户设置文件路径
+        self.config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'config')
+        os.makedirs(self.config_dir, exist_ok=True)
+        self.settings_file = os.path.join(self.config_dir, 'user_settings.json')
+        
+        # 加载用户设置
+        self.settings = self.load_settings()
+        
+        # 导入文件的根目录（从设置中加载）
+        self.import_root_dir = self.settings.get('import_root_dir')
+        
+        # 登录状态
+        self.current_user = None
+        self.login_status_var = tk.StringVar()
+        self.login_status_var.set("未登录")
+        
+        # 确保数据库中有users表并初始化管理员账号
+        self.init_users_table()
+        self.create_admin_user()
+        
+        # 工具菜单引用，用于权限控制
+        self.tools_menu = None
         
         # 设置UI
         self.setup_ui()
@@ -27,6 +86,110 @@ class MainWindow:
         self.init_data()
         
         self.current_search_name = None  # 添加当前搜索人名的记录
+        self.current_search_id = None  # 添加当前搜索编号的记录
+        self.has_searched = False  # 标记是否进行过搜索
+        
+        # 初始设置权限（未登录状态）
+        self.update_menu_by_role(None)
+        self.update_tools_permission(False)
+        
+    def init_users_table(self):
+        """初始化用户表"""
+        try:
+            self.db.cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL,
+                    real_name TEXT,
+                    role TEXT DEFAULT 'user',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            self.db.conn.commit()
+            logging.info("用户表初始化完成")
+        except Exception as e:
+            logging.error(f"初始化用户表失败: {str(e)}")
+            
+    def create_admin_user(self):
+        """创建管理员账号"""
+        try:
+            # 检查管理员账号是否存在
+            self.db.cursor.execute('SELECT COUNT(*) FROM users WHERE username = ?', ('admin',))
+            if self.db.cursor.fetchone()[0] == 0:
+                # 创建管理员账号
+                hashed_password = self.hash_password('admin123')
+                self.db.cursor.execute(
+                    'INSERT INTO users (username, password, real_name, role) VALUES (?, ?, ?, ?)',
+                    ('admin', hashed_password, '系统管理员', 'admin')
+                )
+                self.db.conn.commit()
+                logging.info("已创建管理员账号")
+            else:
+                logging.info("管理员账号已存在")
+        except Exception as e:
+            logging.error(f"创建管理员账号失败: {str(e)}")
+            
+    def update_menu_by_role(self, role):
+        """根据用户角色更新菜单"""
+        # 清空文件菜单
+        self.file_menu.delete(0, tk.END)
+        
+        if role == 'admin':
+            # 管理员菜单
+            self.file_menu.add_command(label="修改密码", command=self.show_change_password_dialog)
+            self.file_menu.add_command(label="添加用户", command=self.show_register_dialog)
+            self.file_menu.add_command(label="退出登录", command=self.logout)
+            self.file_menu.add_separator()
+            self.file_menu.add_command(label="退出系统", command=self.root.quit)
+            
+            # 启用工具菜单
+            self.update_tools_permission(True)
+            
+        elif role == 'user':
+            # 普通用户菜单
+            self.file_menu.add_command(label="退出登录", command=self.logout)
+            self.file_menu.add_separator()
+            self.file_menu.add_command(label="退出系统", command=self.root.quit)
+            
+            # 禁用工具菜单
+            self.update_tools_permission(False)
+            
+        else:
+            # 未登录菜单
+            self.file_menu.add_command(label="登录", command=self.show_login_dialog)
+            self.file_menu.add_separator()
+            self.file_menu.add_command(label="退出系统", command=self.root.quit)
+            
+            # 禁用工具菜单
+            self.update_tools_permission(False)
+        
+    def update_tools_permission(self, is_admin):
+        """更新工具栏权限"""
+        if hasattr(self, 'import_category_btn'):
+            if is_admin:
+                self.import_category_btn.config(state=tk.NORMAL)
+                self.import_file_btn.config(state=tk.NORMAL)
+                # 启用清理数据库菜单
+                self.tools_menu.entryconfigure("清理数据库", state=tk.NORMAL)
+            else:
+                self.import_category_btn.config(state=tk.DISABLED)
+                self.import_file_btn.config(state=tk.DISABLED)
+                # 禁用清理数据库菜单
+                self.tools_menu.entryconfigure("清理数据库", state=tk.DISABLED)
+
+    def get_version(self):
+        """获取系统版本号"""
+        version_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'version.txt')
+        if os.path.exists(version_file):
+            try:
+                with open(version_file, 'r') as f:
+                    return f.read().strip()
+            except Exception as e:
+                logging.error(f"读取版本文件失败: {str(e)}")
+                return "1.0.0"
+        else:
+            return "1.0.0"
         
     def setup_ui(self):
         """设置用户界面"""
@@ -42,6 +205,9 @@ class MainWindow:
         y = (screen_height - window_height) // 2
         self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
         
+        # 创建菜单栏
+        self.create_menu()
+        
         # 创建工具栏
         self.create_toolbar()
         
@@ -54,11 +220,11 @@ class MainWindow:
         self.root.config(menu=menubar)
         
         # 文件菜单
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="文件", menu=file_menu)
-        file_menu.add_command(label="登录", command=self.show_login_dialog)
-        file_menu.add_separator()
-        file_menu.add_command(label="退出", command=self.root.quit)
+        self.file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="文件", menu=self.file_menu)
+        
+        # 先添加登录选项（默认显示）
+        self.file_menu.add_command(label="登录", command=self.show_login_dialog)
         
         # 帮助菜单
         help_menu = tk.Menu(menubar, tearoff=0)
@@ -67,9 +233,15 @@ class MainWindow:
         help_menu.add_command(label="关于", command=self.show_about)
         
         # 工具菜单
-        tools_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="工具", menu=tools_menu)
-        tools_menu.add_command(label="清理数据库", command=self.cleanup_database)
+        self.tools_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="工具", menu=self.tools_menu)
+        self.tools_menu.add_command(label="清理数据库", command=self.cleanup_database)
+        
+        # 用户管理菜单（初始时不显示，管理员登录后再添加）
+        self.user_menu = tk.Menu(menubar, tearoff=0)
+        
+        # 初始不添加到菜单栏，管理员登录后再添加
+        self.user_menu_index = None
         
     def create_toolbar(self):
         """创建工具栏"""
@@ -81,29 +253,42 @@ class MainWindow:
         button_frame.pack(side=tk.LEFT, padx=(0, 10))
         
         # 导入分类按钮
-        import_category_btn = ttk.Button(
+        self.import_category_btn = ttk.Button(
             button_frame, 
             text="导入分类", 
             command=self.import_categories
         )
-        import_category_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.import_category_btn.pack(side=tk.LEFT, padx=(0, 5))
         
         # 导入文件按钮
-        import_file_btn = ttk.Button(
+        self.import_file_btn = ttk.Button(
             button_frame, 
             text="导入文件", 
             command=self.import_files
         )
-        import_file_btn.pack(side=tk.LEFT)
+        self.import_file_btn.pack(side=tk.LEFT)
         
         # 右侧搜索框架
         search_frame = ttk.Frame(toolbar_frame)
         search_frame.pack(side=tk.RIGHT, fill=tk.X, expand=True)
         
-        # 搜索框
-        self.search_var = tk.StringVar()
-        search_entry = ttk.Entry(search_frame, textvariable=self.search_var)
-        search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        # 登录状态显示
+        login_status_label = ttk.Label(search_frame, textvariable=self.login_status_var)
+        login_status_label.pack(side=tk.RIGHT, padx=(10, 0))
+        
+        # 姓名搜索框
+        name_label = ttk.Label(search_frame, text="姓名:")
+        name_label.pack(side=tk.LEFT, padx=(0, 2))
+        self.search_name_var = tk.StringVar()
+        name_entry = ttk.Entry(search_frame, textvariable=self.search_name_var, width=10)
+        name_entry.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # 编号搜索框
+        id_label = ttk.Label(search_frame, text="编号:")
+        id_label.pack(side=tk.LEFT, padx=(0, 2))
+        self.search_id_var = tk.StringVar()
+        id_entry = ttk.Entry(search_frame, textvariable=self.search_id_var, width=10)
+        id_entry.pack(side=tk.LEFT, padx=(0, 10))
         
         # 搜索按钮
         search_button = ttk.Button(search_frame, text="搜索", command=self.search_person)
@@ -156,26 +341,32 @@ class MainWindow:
         list_frame = ttk.Frame(self.right_frame)
         list_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 创建Treeview，添加说明列
+        # 创建Treeview，添加新的列（类号、材料名称、编号、姓名、日期、页数）
         self.file_list = ttk.Treeview(
             list_frame, 
-            columns=('filename', 'person', 'category', 'description', 'path'),
+            columns=('filename', 'class_code', 'material_name', 'file_id', 'person', 'date', 'page_count', 'path'),
             show='headings'
         )
         
         # 设置列标题
         self.file_list.heading('filename', text='文件名')
+        self.file_list.heading('class_code', text='类号')
+        self.file_list.heading('material_name', text='材料名称')
+        self.file_list.heading('file_id', text='编号')
         self.file_list.heading('person', text='姓名')
-        self.file_list.heading('category', text='分类')
-        self.file_list.heading('description', text='说明')
+        self.file_list.heading('date', text='日期')
+        self.file_list.heading('page_count', text='页数')
         self.file_list.heading('path', text='路径')
         
         # 设置列宽度
         self.file_list.column('filename', width=100)
+        self.file_list.column('class_code', width=50)
+        self.file_list.column('material_name', width=150)
+        self.file_list.column('file_id', width=50)
         self.file_list.column('person', width=80)
-        self.file_list.column('category', width=150)
-        self.file_list.column('description', width=200)
-        self.file_list.column('path', width=300)
+        self.file_list.column('date', width=80)
+        self.file_list.column('page_count', width=40)
+        self.file_list.column('path', width=200)
         
         # 添加滚动条
         scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.file_list.yview)
@@ -191,9 +382,29 @@ class MainWindow:
     def get_category_info(self, file_code):
         """根据文件编码获取分类信息"""
         try:
-            main_num = file_code.split('-')[0]
+            if file_code is None:
+                return ""
+                
+            parts = file_code.split('-')
+            main_num = parts[0]
             
-            # 查询主分类名称
+            # 先尝试获取二级分类
+            if len(parts) >= 2 and parts[1].isdigit():
+                sub_num = parts[1]
+                # 查询二级分类信息
+                self.db.cursor.execute('''
+                    SELECT c.category, p.category as parent_category
+                    FROM categories c
+                    JOIN categories p ON c.parent_category = p.category
+                    WHERE c.main_category_num = ? 
+                    AND c.sub_category_num = ?
+                ''', (main_num, sub_num))
+                
+                result = self.db.cursor.fetchone()
+                if result:
+                    return f"{result[1]} - {result[0]}"
+            
+            # 如果没有二级分类或找不到，查询主分类名称
             self.db.cursor.execute('''
                 SELECT category 
                 FROM categories 
@@ -204,10 +415,11 @@ class MainWindow:
             result = self.db.cursor.fetchone()
             if result:
                 return result[0]
+            
             return ""
             
         except Exception as e:
-            logging.error(f"获取分类信息失败: {str(e)}")
+            logging.error(f"获取分类信息失败: {str(e)}", exc_info=True)
             return ""
 
     def update_file_list(self, files):
@@ -215,29 +427,54 @@ class MainWindow:
         # 清空现有列表
         self.file_list.delete(*self.file_list.get_children())
         
+        logging.debug(f"要更新的文件列表数量: {len(files)}")
+        if files:
+            sample_files = files[:3]
+            logging.debug(f"文件样本: {sample_files}")
+        
         try:
-            # 插入新的文件记录
+            # 筛选只显示PDF文件
+            pdf_files = []
             for file_name, file_path in files:
-                # 从文件路径中提取人名（文件夹名）
-                person_name = os.path.basename(os.path.dirname(file_path))
+                # 将文件名转为小写进行判断
+                if file_name.lower().endswith('.pdf'):
+                    pdf_files.append((file_name, file_path))
+                    
+            logging.debug(f"筛选后的PDF文件数量: {len(pdf_files)}")
+            
+            # 插入新的文件记录
+            for file_name, file_path in pdf_files:
+                # 从文件路径中提取人名和文件夹名
+                dir_name = os.path.basename(os.path.dirname(file_path))
                 
-                # 从文件名中提取分类编码（例如 9-2）
-                file_code = '-'.join(file_name.split('-')[:2])
+                # 提取编号 - 获取文件夹名中的数字前缀
+                # 正则表达式提取开头的连续数字
+                match = re.match(r'^(\d+)(.*)', dir_name)
+                file_id = ""
+                person_name = dir_name
                 
-                # 获取分类名称
-                category_name = self.get_category_info(file_code)
+                if match:
+                    file_id = match.group(1)
+                    # 处理姓名，去掉数字部分只保留人名
+                    person_name = match.group(2).strip()
                 
-                # 分类列只显示编码
-                category_display = file_code
+                # 文件名就是类号（例如 3-1.pdf 的类号就是 3-1）
+                class_code = os.path.splitext(file_name)[0]
                 
-                # 说明列显示分类名称
-                description = category_name
+                logging.debug(f"处理文件: {file_name}, 类号: {class_code}, 编号: {file_id}, 人名: {person_name}, 目录名: {dir_name}")
                 
+                # 从Excel获取文件信息（材料名称、日期、页数）
+                material_name, file_date, page_count = self.get_excel_info(dir_name, class_code)
+                
+                # 插入到列表
                 self.file_list.insert('', 'end', values=(
                     file_name,
+                    class_code,
+                    material_name,
+                    file_id,
                     person_name,
-                    category_display,
-                    description,
+                    file_date,
+                    page_count,
                     file_path
                 ))
                 
@@ -245,21 +482,267 @@ class MainWindow:
             logging.error(f"更新文件列表失败: {str(e)}")
             messagebox.showerror("错误", f"更新文件列表失败：{str(e)}")
 
-    # 事件处理方法
+    def hash_password(self, password):
+        """对密码进行哈希加密"""
+        return hashlib.sha256(password.encode()).hexdigest()
+    
+    def register_user(self, username, password, real_name):
+        """注册新用户"""
+        try:
+            # 检查用户名是否已存在
+            self.db.cursor.execute('SELECT COUNT(*) FROM users WHERE username = ?', (username,))
+            if self.db.cursor.fetchone()[0] > 0:
+                return False, "用户名已存在"
+            
+            # 密码加密
+            hashed_password = self.hash_password(password)
+            
+            # 插入新用户
+            self.db.cursor.execute(
+                'INSERT INTO users (username, password, real_name) VALUES (?, ?, ?)',
+                (username, hashed_password, real_name)
+            )
+            self.db.conn.commit()
+            return True, "注册成功"
+        except Exception as e:
+            logging.error(f"注册用户失败: {str(e)}")
+            return False, f"注册失败: {str(e)}"
+    
+    def validate_login(self, username, password):
+        """验证登录信息"""
+        try:
+            hashed_password = self.hash_password(password)
+            self.db.cursor.execute(
+                'SELECT id, username, real_name, role FROM users WHERE username = ? AND password = ?',
+                (username, hashed_password)
+            )
+            user = self.db.cursor.fetchone()
+            if user:
+                return True, user
+            else:
+                return False, None
+        except Exception as e:
+            logging.error(f"验证登录失败: {str(e)}")
+            return False, None
+    
+    def show_register_dialog(self):
+        """显示用户注册对话框（仅管理员可用）"""
+        logging.debug("显示注册对话框")
+        
+        # 检查权限
+        if not self.current_user or self.current_user[3] != 'admin':
+            messagebox.showerror("权限错误", "只有管理员可以添加用户")
+            return
+        
+        # 创建注册对话框
+        register_dialog = tk.Toplevel(self.root)
+        register_dialog.title("添加用户")
+        register_dialog.geometry("350x250")  # 进一步增加对话框尺寸
+        register_dialog.resizable(False, False)
+        register_dialog.transient(self.root)
+        register_dialog.grab_set()
+        
+        # 表单框架
+        form_frame = ttk.Frame(register_dialog, padding=20)
+        form_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 用户名
+        ttk.Label(form_frame, text="用户名:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        username_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=username_var, width=20).grid(row=0, column=1, pady=5)
+        
+        # 密码
+        ttk.Label(form_frame, text="密码:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        password_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=password_var, show="*", width=20).grid(row=1, column=1, pady=5)
+        
+        # 确认密码
+        ttk.Label(form_frame, text="确认密码:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        confirm_password_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=confirm_password_var, show="*", width=20).grid(row=2, column=1, pady=5)
+        
+        # 真实姓名
+        ttk.Label(form_frame, text="真实姓名:").grid(row=3, column=0, sticky=tk.W, pady=5)
+        real_name_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=real_name_var, width=20).grid(row=3, column=1, pady=5)
+        
+        # 错误信息
+        error_var = tk.StringVar()
+        error_label = ttk.Label(form_frame, textvariable=error_var, foreground="red")
+        error_label.grid(row=4, column=0, columnspan=2, pady=5)
+        
+        # 注册按钮
+        def do_register():
+            username = username_var.get().strip()
+            password = password_var.get()
+            confirm_password = confirm_password_var.get()
+            real_name = real_name_var.get().strip()
+            
+            # 验证表单
+            if not username:
+                error_var.set("用户名不能为空")
+                return
+            
+            if not password:
+                error_var.set("密码不能为空")
+                return
+            
+            if password != confirm_password:
+                error_var.set("两次输入的密码不一致")
+                return
+            
+            if not real_name:
+                error_var.set("请输入真实姓名")
+                return
+            
+            # 注册用户
+            success, message = self.register_user(username, password, real_name)
+            if success:
+                messagebox.showinfo("添加成功", message)
+                register_dialog.destroy()
+            else:
+                error_var.set(message)
+        
+        # 创建一个按钮框架
+        buttons_frame = ttk.Frame(form_frame)
+        buttons_frame.grid(row=5, column=0, columnspan=2, pady=15)  # 增加垂直间距
+        
+        # 添加更大的按钮
+        ttk.Button(buttons_frame, text="确定", command=do_register, width=15).pack(side=tk.LEFT, padx=15)  # 增加按钮宽度和间距
+        ttk.Button(buttons_frame, text="取消", command=register_dialog.destroy, width=15).pack(side=tk.LEFT, padx=15)  # 增加按钮宽度和间距
+        
+        # 居中对话框
+        register_dialog.update_idletasks()
+        width = register_dialog.winfo_width()
+        height = register_dialog.winfo_height()
+        x = (register_dialog.winfo_screenwidth() // 2) - (width // 2)
+        y = (register_dialog.winfo_screenheight() // 2) - (height // 2)
+        register_dialog.geometry('{}x{}+{}+{}'.format(width, height, x, y))
+        
+        register_dialog.wait_window()
+    
     def show_login_dialog(self):
         """显示登录对话框"""
         logging.debug("显示登录对话框")
-        # TODO: 实现登录对话框
+        
+        # 如果已经登录，显示信息并提供退出选项
+        if self.current_user:
+            result = messagebox.askyesno("已登录", 
+                                        f"当前已经以 {self.current_user[2]} 身份登录。\n\n是否要退出登录？")
+            if result:
+                self.logout()
+            return
+        
+        # 创建登录对话框
+        login_dialog = tk.Toplevel(self.root)
+        login_dialog.title("用户登录")
+        login_dialog.geometry("280x180")  # 增加对话框尺寸
+        login_dialog.resizable(False, False)
+        login_dialog.transient(self.root)
+        login_dialog.grab_set()
+        
+        # 表单框架
+        form_frame = ttk.Frame(login_dialog, padding=20)
+        form_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 用户名
+        ttk.Label(form_frame, text="用户名:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        username_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=username_var, width=15).grid(row=0, column=1, pady=5)
+        
+        # 密码
+        ttk.Label(form_frame, text="密码:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        password_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=password_var, show="*", width=15).grid(row=1, column=1, pady=5)
+        
+        # 错误信息
+        error_var = tk.StringVar()
+        error_label = ttk.Label(form_frame, textvariable=error_var, foreground="red")
+        error_label.grid(row=2, column=0, columnspan=2, pady=5)
+        
+        # 登录按钮
+        def do_login():
+            username = username_var.get().strip()
+            password = password_var.get()
+            
+            # 验证表单
+            if not username or not password:
+                error_var.set("用户名和密码不能为空")
+                return
+            
+            # 验证登录
+            success, user = self.validate_login(username, password)
+            if success:
+                self.current_user = user
+                self.login_status_var.set(f"已登录: {user[2]}")
+                messagebox.showinfo("登录成功", f"欢迎回来，{user[2]}！")
+                
+                # 更新菜单和权限
+                self.update_menu_by_role(user[3])
+                
+                login_dialog.destroy()
+            else:
+                error_var.set("用户名或密码错误")
+        
+        # 创建一个按钮框架
+        buttons_frame = ttk.Frame(form_frame)
+        buttons_frame.grid(row=3, column=0, columnspan=2, pady=10)
+        
+        # 添加更大的按钮
+        ttk.Button(buttons_frame, text="登录", command=do_login, width=10).pack(side=tk.LEFT, padx=10)
+        ttk.Button(buttons_frame, text="取消", command=login_dialog.destroy, width=10).pack(side=tk.LEFT, padx=10)
+        
+        # 居中对话框
+        login_dialog.update_idletasks()
+        width = login_dialog.winfo_width()
+        height = login_dialog.winfo_height()
+        x = (login_dialog.winfo_screenwidth() // 2) - (width // 2)
+        y = (login_dialog.winfo_screenheight() // 2) - (height // 2)
+        login_dialog.geometry('{}x{}+{}+{}'.format(width, height, x, y))
+        
+        login_dialog.wait_window()
+    
+    def logout(self):
+        """退出登录"""
+        self.current_user = None
+        self.login_status_var.set("未登录")
+        logging.info("用户已退出登录")
+        
+        # 更新菜单和权限
+        self.update_menu_by_role(None)
         
     def show_help(self):
         """显示帮助信息"""
         logging.debug("显示帮助信息")
-        # TODO: 实现帮助对话框
+        help_text = """档案管理系统使用说明：
+
+1. 用户登录
+   * 默认管理员账号: admin 密码: admin123
+   * 点击"文件"菜单中的"登录"选项进入登录界面
+   * 管理员可以添加新用户和修改密码
+
+2. 搜索功能
+   * 在右上角输入姓名或编号进行搜索
+   * 搜索后才能查看左侧分类目录下的文件
+
+3. 文件浏览
+   * 左侧为档案分类目录
+   * 右侧显示文件列表
+   * 双击右侧文件可以打开查看
+
+4. 导入功能 (仅管理员)
+   * 导入分类: 导入档案分类结构
+   * 导入文件: 导入档案文件
+
+5. 数据管理 (仅管理员)
+   * 工具菜单中的"清理数据库"可以清理重复和无效记录
+"""
+        messagebox.showinfo("使用说明", help_text)
         
     def show_about(self):
         """显示关于信息"""
         logging.debug("显示关于信息")
-        # TODO: 实现关于对话框
+        messagebox.showinfo("关于", f"档案管理系统\n\n版本: {self.version}\n版权所有 © 2024")
         
     def import_categories(self):
         """导入分类"""
@@ -274,114 +757,198 @@ class MainWindow:
             
             logging.info(f"开始导入分类文件: {file_path}")
             
-            # 读取Excel文件的A列（分类号）、B列和D列
-            df = pd.read_excel(file_path, usecols=[0, 1, 3], engine='openpyxl', header=None)
+            # 读取Excel文件的所有列
+            df = pd.read_excel(file_path, engine='openpyxl')
             
             # 清空现有分类
             self.tree.delete(*self.tree.get_children())
             self.db.cursor.execute('DELETE FROM categories')
             
+            # 清空映射
+            self.category_mapping = {}
+            
             # 用于存储一级分类节点的字典
             parent_nodes = {}
             
-            # 第一遍循环：处理所有分类
-            for index, row in df.iterrows():
-                category_num = str(row[0]).strip() if pd.notna(row[0]) else ""  # A列：分类号
-                b_value = str(row[1]).strip() if pd.notna(row[1]) else ""      # B列
-                d_value = str(row[3]).strip() if pd.notna(row[3]) else ""      # D列
+            # 手动添加所有一级分类
+            all_main_categories = [
+                (1, "履历材料"),
+                (2, "自传材料"),
+                (3, "鉴定、考核材料"),
+                (4, "学历学位、职称、学术、培训等材料"),
+                (5, "政审材料"),
+                (6, "党团材料"),
+                (7, "奖励材料"),
+                (8, "处分材料"),
+                (9, "工资、任免、出国、会议等材料"),
+                (10, "其他材料")
+            ]
+            
+            # 创建一级分类
+            for main_num, category_name in all_main_categories:
+                # 创建树节点
+                node_id = self.tree.insert('', 'end', text=category_name)
+                parent_nodes[category_name] = node_id
                 
-                # 跳过空行
-                if not category_num and not b_value and not d_value:
-                    continue
-                    
-                # 解析分类号
-                nums = category_num.split('-') if category_num else []
-                main_num = int(nums[0]) if nums and nums[0].isdigit() else None
-                sub_num = int(nums[1]) if len(nums) > 1 and nums[1].isdigit() else None
+                # 存入数据库
+                self.db.cursor.execute(
+                    'INSERT INTO categories (category, parent_category, main_category_num, sub_category_num) VALUES (?, ?, ?, ?)',
+                    (category_name, None, main_num, None)
+                )
                 
-                if not b_value or b_value == 'nan':
-                    # 这是一级分类
-                    node_id = self.tree.insert('', 'end', text=d_value)
-                    parent_nodes[d_value] = node_id
+                # 添加到映射
+                self.category_mapping[category_name] = str(main_num)
+                logging.debug(f"插入一级分类: {category_name}, 主分类号: {main_num}")
+            
+            # 第4类的二级分类
+            subcategories_4 = [
+                (4, 1, "学历学位材料"),
+                (4, 2, "专业技术职务材料"),
+                (4, 3, "科研学术材料"),
+                (4, 4, "培训材料")
+            ]
+            
+            # 第9类的二级分类
+            subcategories_9 = [
+                (9, 1, "工资材料"),
+                (9, 2, "任免材料"),
+                (9, 3, "出国（境）审批材料"),
+                (9, 4, "会议代表材料")
+            ]
+            
+            # 合并所有二级分类
+            all_subcategories = subcategories_4 + subcategories_9
+            
+            # 创建二级分类
+            for main_num, sub_num, subcat_name in all_subcategories:
+                # 查找父分类
+                parent_category = None
+                for name, code in self.category_mapping.items():
+                    if code == str(main_num) and not isinstance(name, tuple):
+                        parent_category = name
+                        break
+                
+                if parent_category and parent_category in parent_nodes:
+                    # 创建树节点
+                    child_id = self.tree.insert(parent_nodes[parent_category], 'end', text=subcat_name)
                     
                     # 存入数据库
                     self.db.cursor.execute(
                         'INSERT INTO categories (category, parent_category, main_category_num, sub_category_num) VALUES (?, ?, ?, ?)',
-                        (d_value, None, main_num, None)
+                        (subcat_name, parent_category, main_num, sub_num)
                     )
-                    logging.debug(f"插入一级分类: {d_value}")
-                
-                # 如果B列不为空，说这是一个父分类，需要先把它加入数据库
-                if b_value and b_value != 'nan':
-                    # 检查父分类是否已经在数据库中
-                    self.db.cursor.execute('SELECT category FROM categories WHERE category = ?', (b_value,))
-                    if not self.db.cursor.fetchone():
-                        # 分类不存在，先插入父分类
-                        self.db.cursor.execute(
-                            'INSERT INTO categories (category, parent_category, main_category_num, sub_category_num) VALUES (?, ?, ?, ?)',
-                            (b_value, None, main_num, None)
-                        )
-                        logging.debug(f"插入父分类: {b_value}")
-                        
-                        # 创建树节点
-                        if b_value not in parent_nodes:
-                            node_id = self.tree.insert('', 'end', text=b_value)
-                            parent_nodes[b_value] = node_id
-            
-            # 第二遍循环：创建所有二级分类
-            for index, row in df.iterrows():
-                category_num = str(row[0]).strip() if pd.notna(row[0]) else ""
-                b_value = str(row[1]).strip() if pd.notna(row[1]) else ""
-                d_value = str(row[3]).strip() if pd.notna(row[3]) else ""
-                
-                # 跳过空行
-                if not category_num and not b_value and not d_value:
-                    continue
                     
-                # 解析分类号
-                nums = category_num.split('-') if category_num else []
-                main_num = int(nums[0]) if nums and nums[0].isdigit() else None
-                sub_num = int(nums[1]) if len(nums) > 1 and nums[1].isdigit() else None
-                
-                if b_value and b_value != 'nan':
-                    # 这是二级分类
-                    if b_value in parent_nodes:
-                        # 将D列内容作为B列内容的子分类
-                        child_id = self.tree.insert(parent_nodes[b_value], 'end', text=d_value)
-                        
-                        # 存入数据库
-                        self.db.cursor.execute(
-                            'INSERT INTO categories (category, parent_category, main_category_num, sub_category_num) VALUES (?, ?, ?, ?)',
-                            (d_value, b_value, main_num, sub_num)
-                        )
-                        logging.debug(f"插入二级分类: {d_value}, 父分类: {b_value}")
-                    else:
-                        logging.warning(f"找不到父分类: {b_value}")
+                    # 添加到映射
+                    key = (parent_category, subcat_name)
+                    value = f"{main_num}-{sub_num}"
+                    self.category_mapping[key] = value
+                    logging.debug(f"插入二级分类映射: {key} -> {value}")
+                else:
+                    logging.warning(f"找不到父分类(编码 {main_num})，无法创建二级分类: {subcat_name}")
             
             self.db.conn.commit()
             
-            # 验证数据库中的记录
-            self.db.cursor.execute('SELECT category, parent_category FROM categories')
+            # 验证数据库中的记录并记录日志
+            self.db.cursor.execute('SELECT category, parent_category, main_category_num, sub_category_num FROM categories')
             all_categories = self.db.cursor.fetchall()
-            logging.info(f"数据库中的分类记录: {all_categories}")
+            logging.info(f"数据库中的分类记录: {len(all_categories)} 条")
+            
+            # 检查分类（输出到日志）
+            self.db.cursor.execute('SELECT category, main_category_num FROM categories WHERE parent_category IS NULL ORDER BY main_category_num')
+            main_categories = self.db.cursor.fetchall()
+            
+            logging.info(f"共导入 {len(main_categories)} 个一级分类:")
+            for cat, num in main_categories:
+                logging.info(f"  一级分类: {cat}, 编码: {num}")
+                
+                # 检查其子分类
+                self.db.cursor.execute('SELECT category, sub_category_num FROM categories WHERE parent_category = ? ORDER BY sub_category_num', (cat,))
+                subcats = self.db.cursor.fetchall()
+                for subcat, subnum in subcats:
+                    logging.info(f"    子分类: {subcat}, 子编码: {num}-{subnum}")
+            
+            # 打印完整的映射字典
+            logging.debug("完整的分类映射字典:")
+            for k, v in self.category_mapping.items():
+                if isinstance(k, tuple):
+                    logging.debug(f"  二级分类: {k[0]} -> {k[1]} = {v}")
+                else:
+                    logging.debug(f"  一级分类: {k} = {v}")
             
             logging.info("分类导入完成")
             messagebox.showinfo("成功", "分类导入成功！")
             
         except Exception as e:
             logging.error(f"导入分类失败: {str(e)}", exc_info=True)
-            messagebox.showerror("错误", f"导��失败：{str(e)}")
+            messagebox.showerror("错误", f"导入分类失败：{str(e)}")
+
+    def import_files(self):
+        """导入文件"""
+        try:
+            # 选择文件夹，使用上次的路径作为初始目录
+            initial_dir = self.import_root_dir if self.import_root_dir and os.path.exists(self.import_root_dir) else None
+            folder_path = filedialog.askdirectory(title="选择人员档案文件夹", initialdir=initial_dir)
+            if not folder_path:
+                return
+            
+            # 保存导入目录
+            self.import_root_dir = folder_path
+            logging.info(f"设置导入文件根目录: {self.import_root_dir}")
+            
+            # 保存设置
+            self.save_settings()
+            
+            # 清空现有文件记录
+            self.db.cursor.execute('DELETE FROM person_files')
+            
+            # 遍历文件夹
+            imported_count = 0
+            for root, _, files in os.walk(folder_path):
+                person_name = os.path.basename(root)
+                for file in files:
+                    if file.startswith('.') or file.startswith('~'):
+                        continue
+                    
+                    file_path = os.path.join(root, file)
+                    # 存储绝对路径，而不是相对路径
+                    abs_path = os.path.abspath(file_path)
+                    
+                    self.db.cursor.execute('''
+                        INSERT INTO person_files (person_name, file_name, file_path)
+                        VALUES (?, ?, ?)
+                    ''', (person_name, file, abs_path))
+                    imported_count += 1
+            
+            self.db.conn.commit()
+            messagebox.showinfo("成功", f"文件导入成功，共导入 {imported_count} 个文件")
+            
+            # 刷新文件列表
+            self.search_person()
+            
+        except Exception as e:
+            self.db.conn.rollback()
+            logging.error(f"导入文件失败: {str(e)}")
+            messagebox.showerror("错误", f"导入文件失败：{str(e)}")
 
     def import_archives(self):
         """导入档案"""
         try:
+            # 使用上次的路径作为初始目录
+            initial_dir = self.import_root_dir if self.import_root_dir and os.path.exists(self.import_root_dir) else os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'archives')
             folder_path = filedialog.askdirectory(
                 title="选择档案目录",
-                initialdir=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'archives')
+                initialdir=initial_dir
             )
             
             if not folder_path:
                 return
+            
+            # 保存导入目录
+            self.import_root_dir = folder_path
+            logging.info(f"设置导入档案根目录: {self.import_root_dir}")
+            
+            # 保存设置
+            self.save_settings()
             
             # 先清理数据库中的重复记录
             self.db.cursor.execute('''
@@ -395,6 +962,7 @@ class MainWindow:
             
             # 遍历选择的目录
             imported_count = 0
+            file_count = 0
             for person_folder in os.listdir(folder_path):
                 person_path = os.path.join(folder_path, person_folder)
                 if os.path.isdir(person_path):
@@ -404,7 +972,7 @@ class MainWindow:
                     self.db.cursor.execute('''
                         INSERT OR REPLACE INTO persons (name, folder_path)
                         VALUES (?, ?)
-                    ''', (person_name, person_path))
+                    ''', (person_name, os.path.abspath(person_path)))
                     
                     # 记录该人下的所有文件
                     for root, _, files in os.walk(person_path):
@@ -414,23 +982,28 @@ class MainWindow:
                                 continue
                             
                             file_path = os.path.join(root, file)
+                            abs_path = os.path.abspath(file_path)
                             
                             # 检查文件是否已存在
                             self.db.cursor.execute('''
                                 SELECT COUNT(*) FROM person_files 
                                 WHERE person_name = ? AND file_name = ? AND file_path = ?
-                            ''', (person_name, file, file_path))
+                            ''', (person_name, file, abs_path))
                             
                             if self.db.cursor.fetchone()[0] == 0:
                                 self.db.cursor.execute('''
                                     INSERT INTO person_files (person_name, file_name, file_path)
                                     VALUES (?, ?, ?)
-                                ''', (person_name, file, file_path))
+                                ''', (person_name, file, abs_path))
+                                file_count += 1
                     
                     imported_count += 1
             
             self.db.conn.commit()
-            messagebox.showinfo("成功", f"成功导入 {imported_count} 个人员的档案！")
+            messagebox.showinfo("成功", f"成功导入 {imported_count} 个人员的档案，共 {file_count} 个文件！")
+            
+            # 刷新文件列表
+            self.search_person()
             
         except Exception as e:
             logging.error(f"导入档案失败: {str(e)}")
@@ -438,43 +1011,66 @@ class MainWindow:
 
     def search_person(self):
         """搜索人员档案"""
-        search_text = self.search_var.get().strip()
+        search_name = self.search_name_var.get().strip()
+        search_id = self.search_id_var.get().strip()
         
         try:
             # 清理之前的搜索结果
             self.file_list.delete(*self.file_list.get_children())
             
-            # 保存当前搜索的人名
-            self.current_search_name = search_text if search_text else None
+            # 保存当前搜索的人名和编号
+            self.current_search_name = search_name if search_name else None
+            self.current_search_id = search_id if search_id else None
             
+            # 标记已进行搜索
+            self.has_searched = bool(search_name or search_id)
+            
+            logging.info(f"执行搜索：姓名='{search_name}', 编号='{search_id}'")
+            
+            if not search_name and not search_id:
+                messagebox.showinfo("提示", "请输入姓名或编号进行搜索")
+                return
+                
             # 构建查询
             query = '''
                 SELECT DISTINCT file_name, file_path 
                 FROM person_files 
                 WHERE file_name NOT LIKE '~%'
                 AND file_name NOT LIKE '.%'
+                AND file_name LIKE '%.pdf'
             '''
             params = []
             
-            # 如果有搜索文本，添加人名过滤条件
-            if search_text:
+            # 添加人名过滤条件
+            if search_name:
                 query += ' AND person_name LIKE ?'
-                params.append(f'%{search_text}%')
+                params.append(f'%{search_name}%')
+            
+            # 添加编号过滤条件
+            if search_id:
+                query += ' AND (file_path LIKE ? OR person_name LIKE ?)'
+                params.extend([f'%{search_id}%', f'%{search_id}%'])
             
             query += ' ORDER BY file_name'
+            
+            logging.info(f"搜索查询SQL: {query}, 参数: {params}")
             
             # 执行查询
             self.db.cursor.execute(query, params)
             files = self.db.cursor.fetchall()
+            
+            # 更新文件列表显示
             self.update_file_list(files)
             
-            if search_text:
-                logging.info(f"搜索用户 '{search_text}', 找到文件数量: {len(files)}")
+            if files:
+                logging.info(f"搜索结果: 找到 {len(files)} 个文件")
+                messagebox.showinfo("搜索结果", f"找到 {len(files)} 个匹配文件")
             else:
-                logging.info(f"显示所有文件, 数量: {len(files)}")
+                logging.info("搜索结果: 未找到匹配文件")
+                messagebox.showinfo("搜索结果", "未找到匹配文件")
             
         except Exception as e:
-            logging.error(f"搜索失败: {str(e)}")
+            logging.error(f"搜索失败: {str(e)}", exc_info=True)
             messagebox.showerror("错误", f"搜索失败：{str(e)}")
 
     def extract_category_num(self, filename):
@@ -488,6 +1084,13 @@ class MainWindow:
         """处理分类选择事件"""
         selected_items = self.tree.selection()
         if not selected_items:
+            return
+        
+        # 如果没有进行过搜索，则右侧列表为空
+        if not self.has_searched:
+            self.file_list.delete(*self.file_list.get_children())
+            logging.info("未进行搜索，不显示文件")
+            messagebox.showinfo("提示", "请先输入姓名或编号进行搜索，再查看分类下的文件")
             return
         
         selected_item = selected_items[0]
@@ -504,15 +1107,20 @@ class MainWindow:
                 logging.debug(f"二级分类编码: {category_code}")
                 
                 if category_code:
-                    # 构建查询
+                    # 构建查询，精确匹配分类代码-开头
                     query = '''
                         SELECT DISTINCT file_name, file_path 
                         FROM person_files 
-                        WHERE file_name LIKE ? 
+                        WHERE (
+                            file_name LIKE ? OR    -- 精确的分类代码-开头 (4-1-%)
+                            file_name LIKE ?       -- 点号分隔的格式 (4.1.%)
+                        )
                         AND file_name NOT LIKE '~%'
                         AND file_name NOT LIKE '.%'
+                        AND file_name LIKE '%.pdf'
                     '''
-                    params = [f'{category_code}-%']
+                    # 两种模式匹配: 标准格式(4-1-%)和点分格式(4.1.%)
+                    params = [f'{category_code}-%', f'{category_code.replace("-", ".")}%']
                     
                     # 如果有搜索条件，添加人名过滤
                     if self.current_search_name:
@@ -521,17 +1129,15 @@ class MainWindow:
                     
                     query += ' ORDER BY file_name'
                     
-                    self.db.cursor.execute(query, params)
-                    all_files = self.db.cursor.fetchall()
+                    logging.debug(f"二级分类查询: {query}, 参数: {params}")
                     
-                    # 在 Python 中进行精确匹配过滤
-                    files = []
-                    for f in all_files:
-                        parts = f[0].split('-')
-                        if len(parts) >= 2:
-                            file_code = f"{parts[0]}-{parts[1]}"
-                            if file_code == category_code:
-                                files.append(f)
+                    self.db.cursor.execute(query, params)
+                    files = self.db.cursor.fetchall()
+                    
+                    # 记录查询结果
+                    logging.debug(f"二级分类查询结果数量: {len(files)}")
+                    if len(files) > 0:
+                        logging.debug(f"第一个结果: {files[0]}")
                     
                     self.update_file_list(files)
                     logging.info(f"二级分类查询: {category_code}, 找到文件数量: {len(files)}")
@@ -558,15 +1164,19 @@ class MainWindow:
                         self.file_list.delete(*self.file_list.get_children())
                         logging.info(f"一级分类有子分类，不显示文件")
                     else:
-                        # 构建查询
+                        # 构建查询，精确匹配分类代码-开头
                         query = '''
                             SELECT DISTINCT file_name, file_path 
                             FROM person_files 
-                            WHERE file_name LIKE ? 
+                            WHERE (
+                                file_name LIKE ? OR    -- 精确的分类代码-开头 (4-%)
+                                file_name LIKE ?       -- 点号分隔的格式 (4.%)
+                            )
                             AND file_name NOT LIKE '~%'
                             AND file_name NOT LIKE '.%'
+                            AND file_name LIKE '%.pdf'
                         '''
-                        params = [f'{category_code}-%']
+                        params = [f'{category_code}-%', f'{category_code}.%']
                         
                         # 如果有搜索条件，添加人名过滤
                         if self.current_search_name:
@@ -575,14 +1185,22 @@ class MainWindow:
                         
                         query += ' ORDER BY file_name'
                         
+                        logging.debug(f"一级分类查询: {query}, 参数: {params}")
+                        
                         self.db.cursor.execute(query, params)
                         files = self.db.cursor.fetchall()
+                        
+                        # 记录查询结果
+                        logging.debug(f"一级分类查询结果数量: {len(files)}")
+                        if len(files) > 0:
+                            logging.debug(f"第一个结果: {files[0]}")
+                            
                         self.update_file_list(files)
                         
                         logging.info(f"一级分类查询: {category_code}, 找到文件数量: {len(files)}")
                 
         except Exception as e:
-            logging.error(f"分类查询失败: {str(e)}")
+            logging.error(f"分类查询失败: {str(e)}", exc_info=True)
             messagebox.showerror("错误", f"获取分类文件失败：{str(e)}")
 
     def update_category_tree(self):
@@ -602,22 +1220,16 @@ class MainWindow:
         
         # 获取选中项的完整路径
         item = selected_items[0]
-        file_path = self.file_list.item(item)['values'][4]  # 第5列是路径
+        file_path = self.file_list.item(item)['values'][7]  # 第8列是路径
         
         try:
+            # 检查文件是否存在
             if not os.path.exists(file_path):
-                # 尝试使用相对路径
-                base_dir = os.path.dirname(os.path.abspath(__file__))
-                project_dir = os.path.dirname(os.path.dirname(base_dir))
-                abs_path = os.path.join(project_dir, file_path.lstrip('/\\'))
-                
-                if not os.path.exists(abs_path):
-                    messagebox.showerror("错误", f"找不到文件：\n{file_path}")
-                    logging.error(f"文件不存在: {file_path}")
-                    logging.debug(f"尝试的绝对路径: {abs_path}")
-                    return
-                file_path = abs_path
+                messagebox.showerror("错误", f"找不到文件：\n{file_path}")
+                logging.error(f"文件不存在: {file_path}")
+                return
             
+            # 打开文件
             logging.debug(f"打开文件: {file_path}")
             if sys.platform == 'win32':
                 os.startfile(file_path)
@@ -748,40 +1360,420 @@ class MainWindow:
             logging.error(f"加载分类树失败: {str(e)}", exc_info=True)
             raise
 
-    def import_files(self):
-        """导入文件"""
+    def get_excel_info(self, person_name, class_code):
+        """从Excel获取文件相关信息"""
         try:
-            # 选择文件夹
-            folder_path = filedialog.askdirectory(title="选择人员档案文件夹")
-            if not folder_path:
-                return
+            # 默认值
+            material_name = ""
+            file_date = ""
+            page_count = ""
             
-            # 清空现有文件记录
-            self.db.cursor.execute('DELETE FROM person_files')
+            # 如果没有搜索编号和姓名，则不查询Excel数据
+            if not hasattr(self, 'current_search_name') or not hasattr(self, 'current_search_id') or \
+               (not self.current_search_name and not self.current_search_id):
+                logging.info("未执行搜索或搜索条件为空，跳过Excel数据查询")
+                return material_name, file_date, page_count
+                
+            # 如果没有设置导入目录，无法查找Excel文件
+            if not hasattr(self, 'import_root_dir') or not self.import_root_dir:
+                logging.warning("未设置导入目录，请先导入文件或档案")
+                return material_name, file_date, page_count
+                
+            # 全面诊断日志
+            logging.info(f"====== 开始读取Excel文件信息 ======")
+            logging.info(f"人名: '{person_name}', 类号: '{class_code}'")
+            logging.info(f"搜索条件：姓名='{self.current_search_name}', 编号='{self.current_search_id}'")
+            logging.info(f"从导入目录查找Excel文件: {self.import_root_dir}")
             
-            # 遍历文件夹
-            for root, _, files in os.walk(folder_path):
-                person_name = os.path.basename(root)
-                for file in files:
-                    if file.startswith('.') or file.startswith('~'):
-                        continue
+            # 首先确定对应的sheet
+            # 解析类号 (例如: 4-1-1, 9-2-3)
+            class_parts = class_code.split('-')
+            main_code = class_parts[0]  # 主分类号 (例如 4, 9)
+            
+            # 特殊处理第四类和第九类，它们有二级子类
+            sheet_code = main_code
+            search_class_code = class_code
+            
+            if main_code in ['4', '9'] and len(class_parts) >= 2:
+                # 例如: 4-1-1 -> 使用sheet "四-1"，匹配A列值 "4-1-1"
+                sheet_code = f"{main_code}-{class_parts[1]}"
+                search_class_code = class_code  # 完整类号用于在A列查找
+                logging.info(f"特殊处理类别 {main_code}，使用二级sheet代码: {sheet_code}，查找A列值: {search_class_code}")
+            else:
+                # 例如: 1-1 -> 使用sheet "一"，匹配A列值 "1-1"
+                search_class_code = class_code
+                logging.info(f"标准处理类别 {main_code}，使用sheet代码: {sheet_code}，查找A列值: {search_class_code}")
+            
+            # 转换为对应的sheet名称
+            sheet_map = {
+                '1': '一', '2': '二', '3': '三', 
+                '4-1': '四-1', '4-2': '四-2', '4-3': '四-3', '4-4': '四-4',
+                '5': '五', '6': '六', '7': '七', '8': '八',
+                '9-1': '九-1', '9-2': '九-2', '9-3': '九-3', '9-4': '九-4',
+                '10': '十'
+            }
+            
+            sheet_name = sheet_map.get(sheet_code)
+            if not sheet_name:
+                logging.warning(f"无法找到对应的sheet名称，sheet_code: {sheet_code}")
+                return material_name, file_date, page_count
+                
+            logging.info(f"类号: '{class_code}', 解析为: sheet名称'{sheet_name}', 查找A列值: '{search_class_code}'")
+            
+            # 在导入目录中查找Excel文件
+            excel_file_path = None
+            
+            # 精确查找：根据编号和姓名查找对应的Excel文件
+            person_dir = None
+            
+            # 查找规则：
+            # 1. 先在导入目录和子目录中查找与编号和姓名匹配的Excel文件
+            # 2. 如果没找到，再查找与编号和姓名匹配的目录，并在里面查找Excel文件
+            
+            # 导入目录下查找匹配的Excel文件
+            for root, dirs, files in os.walk(self.import_root_dir):
+                excel_files = [f for f in files if f.endswith('.xlsx') and not f.startswith('~')]
+                if excel_files:
+                    logging.info(f"在目录 {root} 中找到 {len(excel_files)} 个Excel文件")
                     
-                    file_path = os.path.join(root, file)
-                    # 存储相对路径
-                    rel_path = os.path.relpath(file_path, os.path.dirname(folder_path))
+                    # 优先查找匹配编号和姓名的Excel文件
+                    if self.current_search_id and self.current_search_name:
+                        for file in excel_files:
+                            if self.current_search_id in file and self.current_search_name in file:
+                                excel_file_path = os.path.join(root, file)
+                                logging.info(f"找到匹配的Excel文件(编号+姓名): {excel_file_path}")
+                                break
                     
-                    self.db.cursor.execute('''
-                        INSERT INTO person_files (person_name, file_name, file_path)
-                        VALUES (?, ?, ?)
-                    ''', (person_name, file, rel_path))
+                    # 如果未找到，则查找匹配编号的Excel文件
+                    if not excel_file_path and self.current_search_id:
+                        for file in excel_files:
+                            if self.current_search_id in file:
+                                excel_file_path = os.path.join(root, file)
+                                logging.info(f"找到匹配的Excel文件(编号): {excel_file_path}")
+                                break
+                    
+                    # 如果仍未找到，则查找匹配姓名的Excel文件
+                    if not excel_file_path and self.current_search_name:
+                        for file in excel_files:
+                            if self.current_search_name in file:
+                                excel_file_path = os.path.join(root, file)
+                                logging.info(f"找到匹配的Excel文件(姓名): {excel_file_path}")
+                                break
+                
+                # 如果找到了Excel文件，终止搜索
+                if excel_file_path:
+                    break
+                
+                # 查找匹配的目录
+                for dir_name in dirs:
+                    if (self.current_search_id and self.current_search_id in dir_name) or \
+                       (self.current_search_name and self.current_search_name in dir_name):
+                        person_dir = os.path.join(root, dir_name)
+                        logging.info(f"找到匹配的目录: {person_dir}")
+                        break
+                
+                if person_dir:
+                    # 在匹配的目录中查找Excel文件
+                    for subroot, _, subfiles in os.walk(person_dir):
+                        excel_files = [f for f in subfiles if f.endswith('.xlsx') and not f.startswith('~')]
+                        if excel_files:
+                            excel_file_path = os.path.join(subroot, excel_files[0])
+                            logging.info(f"在匹配目录中找到Excel文件: {excel_file_path}")
+                            break
+                    
+                    if excel_file_path:
+                        break
             
-            self.db.conn.commit()
-            messagebox.showinfo("成功", "文件导入成功")
+            # 没有找到任何Excel文件，返回空值
+            if not excel_file_path:
+                logging.warning("在导入目录中未找到匹配的Excel文件")
+                return material_name, file_date, page_count
             
-            # 刷新文件列表
-            self.search_person()
+            # 使用找到的Excel文件
+            logging.info(f"将使用Excel文件: {excel_file_path}")
+            
+            try:
+                # 读取Excel文件中的所有sheet
+                excel = pd.ExcelFile(excel_file_path)
+                all_sheets = excel.sheet_names
+                logging.info(f"Excel文件包含的sheets: {all_sheets}")
+                
+                # 检查目标sheet是否存在
+                if sheet_name not in all_sheets:
+                    logging.warning(f"未找到sheet '{sheet_name}'，尝试查找相似名称")
+                    # 尝试其他可能的sheet名称，例如带引号或括号的
+                    possible_sheets = [s for s in all_sheets if sheet_name in s]
+                    if possible_sheets:
+                        sheet_name = possible_sheets[0]
+                        logging.info(f"使用相似的sheet名称: {sheet_name}")
+                    else:
+                        logging.error(f"在Excel文件中未找到sheet '{sheet_name}'或相似名称")
+                        return material_name, file_date, page_count
+                
+                # 读取sheet数据
+                df = pd.read_excel(excel_file_path, sheet_name=sheet_name)
+                logging.info(f"成功读取sheet '{sheet_name}', 行数: {len(df)}")
+                
+                # 显示前几行数据用于调试
+                if not df.empty:
+                    preview = df.head().to_string()
+                    logging.info(f"表格前5行数据:\n{preview}")
+                else:
+                    logging.warning(f"表格 '{sheet_name}' 是空的")
+                    return material_name, file_date, page_count
+                
+                # 在A列中查找与类号匹配的行
+                found = False
+                logging.info(f"开始在A列中查找值: '{search_class_code}'")
+                
+                # 输出A列所有值用于调试
+                a_column_values = df.iloc[:, 0].astype(str).tolist()
+                logging.info(f"A列所有值: {a_column_values}")
+                
+                for i, value in enumerate(df.iloc[:, 0]):
+                    # 转换为字符串并去除空格
+                    str_value = str(value).strip()
+                    logging.debug(f"行 {i+1}, A列值: '{str_value}'")
+                    
+                    # 先尝试精确匹配
+                    if str_value == search_class_code:
+                        row = df.iloc[i]
+                        logging.info(f"在第 {i+1} 行找到精确匹配: '{str_value}' == '{search_class_code}'")
+                        
+                        # 获取所有列的值用于调试
+                        row_values = row.to_list()
+                        logging.info(f"匹配行所有列的值: {row_values}")
+                        
+                        # 获取材料名称(B列)
+                        if len(row) > 1:
+                            material_name = str(row.iloc[1]) if pd.notna(row.iloc[1]) else ""
+                            logging.info(f"B列(材料名称): '{material_name}'")
+                        else:
+                            logging.warning("行数据不足，无法读取B列")
+                        
+                        # 获取日期(C,D,E列)，拼接为YYYY-MM-DD格式
+                        try:
+                            if len(row) > 4:
+                                year = str(int(row.iloc[2])) if pd.notna(row.iloc[2]) else ""
+                                month = str(int(row.iloc[3])) if pd.notna(row.iloc[3]) else ""
+                                day = str(int(row.iloc[4])) if pd.notna(row.iloc[4]) else ""
+                                
+                                logging.info(f"C列(年): '{row.iloc[2]}' -> '{year}'")
+                                logging.info(f"D列(月): '{row.iloc[3]}' -> '{month}'")
+                                logging.info(f"E列(日): '{row.iloc[4]}' -> '{day}'")
+                                
+                                if year and month and day:
+                                    file_date = f"{year}-{month}-{day}"
+                                    logging.info(f"拼接日期: '{file_date}'")
+                                else:
+                                    logging.warning("日期数据不完整")
+                            else:
+                                logging.warning("行数据不足，无法读取完整日期列")
+                        except (ValueError, TypeError) as e:
+                            logging.error(f"日期转换错误: {e}")
+                        
+                        # 获取页数(F列)
+                        try:
+                            if len(row) > 5:
+                                page_value = row.iloc[5]
+                                logging.info(f"F列(页数)原始值: '{page_value}'")
+                                page_count = str(int(page_value)) if pd.notna(page_value) else ""
+                                logging.info(f"处理后页数: '{page_count}'")
+                            else:
+                                logging.warning("行数据不足，无法读取F列")
+                        except (ValueError, TypeError) as e:
+                            logging.error(f"页数转换错误: {e}")
+                        
+                        logging.info(f"最终结果 - 材料名称: '{material_name}', 日期: '{file_date}', 页数: '{page_count}'")
+                        found = True
+                        break
+                
+                if not found:
+                    logging.warning(f"未找到精确匹配，尝试模糊匹配: {search_class_code}")
+                    # 尝试模糊匹配，处理可能的格式不同问题
+                    for i, value in enumerate(df.iloc[:, 0]):
+                        str_value = str(value).strip()
+                        # 移除所有非数字和短横线
+                        clean_value = ''.join(c for c in str_value if c.isdigit() or c == '-')
+                        clean_code = ''.join(c for c in search_class_code if c.isdigit() or c == '-')
+                        
+                        logging.debug(f"行 {i+1}，清理后A列值: '{clean_value}'，清理后搜索值: '{clean_code}'")
+                        
+                        if clean_value == clean_code:
+                            row = df.iloc[i]
+                            logging.info(f"在第 {i+1} 行找到模糊匹配: '{clean_value}' == '{clean_code}'")
+                            
+                            # 获取所有列的值用于调试
+                            row_values = row.to_list()
+                            logging.info(f"匹配行所有列的值: {row_values}")
+                            
+                            # 获取材料名称(B列)
+                            if len(row) > 1:
+                                material_name = str(row.iloc[1]) if pd.notna(row.iloc[1]) else ""
+                                logging.info(f"B列(材料名称): '{material_name}'")
+                            
+                            # 获取日期(C,D,E列)
+                            try:
+                                if len(row) > 4:
+                                    year = str(int(row.iloc[2])) if pd.notna(row.iloc[2]) else ""
+                                    month = str(int(row.iloc[3])) if pd.notna(row.iloc[3]) else ""
+                                    day = str(int(row.iloc[4])) if pd.notna(row.iloc[4]) else ""
+                                    
+                                    logging.info(f"C列(年): '{row.iloc[2]}' -> '{year}'")
+                                    logging.info(f"D列(月): '{row.iloc[3]}' -> '{month}'")
+                                    logging.info(f"E列(日): '{row.iloc[4]}' -> '{day}'")
+                                    
+                                    if year and month and day:
+                                        file_date = f"{year}-{month}-{day}"
+                                        logging.info(f"拼接日期: '{file_date}'")
+                                else:
+                                    logging.warning("行数据不足，无法读取完整日期列")
+                            except (ValueError, TypeError) as e:
+                                logging.error(f"日期转换错误: {e}")
+                            
+                            # 获取页数(F列)
+                            try:
+                                if len(row) > 5:
+                                    page_value = row.iloc[5]
+                                    logging.info(f"F列(页数)原始值: '{page_value}'")
+                                    page_count = str(int(page_value)) if pd.notna(page_value) else ""
+                                    logging.info(f"处理后页数: '{page_count}'")
+                                else:
+                                    logging.warning("行数据不足，无法读取F列")
+                            except (ValueError, TypeError) as e:
+                                logging.error(f"页数转换错误: {e}")
+                            
+                            logging.info(f"模糊匹配结果 - 材料名称: '{material_name}', 日期: '{file_date}', 页数: '{page_count}'")
+                            found = True
+                            break
+                
+                if not found:
+                    logging.error(f"在Sheet '{sheet_name}' 中未找到与值 '{search_class_code}' 匹配的行")
+            
+            except Exception as e:
+                logging.error(f"处理Excel文件 {excel_file_path} 失败: {str(e)}", exc_info=True)
+            
+            logging.info(f"====== 结束读取Excel文件信息 ======")
+            return material_name, file_date, page_count
             
         except Exception as e:
-            self.db.conn.rollback()
-            logging.error(f"导入文件失败: {str(e)}")
-            messagebox.showerror("错误", f"导入文件失败：{str(e)}")
+            logging.error(f"获取Excel信息失败: {str(e)}", exc_info=True)
+            return "", "", ""
+
+    def load_settings(self):
+        """加载用户设置"""
+        if os.path.exists(self.settings_file):
+            try:
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                logging.info(f"成功加载用户设置: {settings}")
+                return settings
+            except Exception as e:
+                logging.error(f"加载用户设置失败: {str(e)}")
+                return {}
+        else:
+            logging.info("未找到用户设置文件，将使用默认设置")
+            return {}
+    
+    def save_settings(self):
+        """保存用户设置"""
+        try:
+            settings = {
+                'import_root_dir': self.import_root_dir
+            }
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, ensure_ascii=False, indent=2)
+            logging.info(f"成功保存用户设置: {settings}")
+        except Exception as e:
+            logging.error(f"保存用户设置失败: {str(e)}")
+
+    def show_change_password_dialog(self):
+        """显示修改密码对话框"""
+        # 检查权限
+        if not self.current_user or self.current_user[3] != 'admin':
+            messagebox.showerror("权限错误", "只有管理员可以修改密码")
+            return
+            
+        # 创建修改密码对话框
+        change_pwd_dialog = tk.Toplevel(self.root)
+        change_pwd_dialog.title("修改密码")
+        change_pwd_dialog.geometry("320x200")  # 增加对话框尺寸
+        change_pwd_dialog.resizable(False, False)
+        change_pwd_dialog.transient(self.root)
+        change_pwd_dialog.grab_set()
+        
+        # 表单框架
+        form_frame = ttk.Frame(change_pwd_dialog, padding=20)
+        form_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 旧密码
+        ttk.Label(form_frame, text="当前密码:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        old_password_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=old_password_var, show="*", width=20).grid(row=0, column=1, pady=5)
+        
+        # 新密码
+        ttk.Label(form_frame, text="新密码:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        new_password_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=new_password_var, show="*", width=20).grid(row=1, column=1, pady=5)
+        
+        # 确认新密码
+        ttk.Label(form_frame, text="确认新密码:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        confirm_password_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=confirm_password_var, show="*", width=20).grid(row=2, column=1, pady=5)
+        
+        # 错误信息
+        error_var = tk.StringVar()
+        error_label = ttk.Label(form_frame, textvariable=error_var, foreground="red")
+        error_label.grid(row=3, column=0, columnspan=2, pady=5)
+        
+        # 修改密码按钮
+        def do_change_password():
+            old_password = old_password_var.get()
+            new_password = new_password_var.get()
+            confirm_password = confirm_password_var.get()
+            
+            # 验证表单
+            if not old_password or not new_password or not confirm_password:
+                error_var.set("所有密码字段不能为空")
+                return
+            
+            if new_password != confirm_password:
+                error_var.set("两次输入的新密码不一致")
+                return
+            
+            # 验证旧密码
+            success, _ = self.validate_login(self.current_user[1], old_password)
+            if not success:
+                error_var.set("当前密码错误")
+                return
+                
+            # 修改密码
+            try:
+                hashed_password = self.hash_password(new_password)
+                self.db.cursor.execute(
+                    'UPDATE users SET password = ? WHERE id = ?',
+                    (hashed_password, self.current_user[0])
+                )
+                self.db.conn.commit()
+                messagebox.showinfo("成功", "密码修改成功！")
+                change_pwd_dialog.destroy()
+            except Exception as e:
+                error_var.set(f"修改失败: {str(e)}")
+        
+        # 创建一个按钮框架
+        buttons_frame = ttk.Frame(form_frame)
+        buttons_frame.grid(row=4, column=0, columnspan=2, pady=10)
+        
+        # 添加更大的按钮
+        ttk.Button(buttons_frame, text="确定", command=do_change_password, width=10).pack(side=tk.LEFT, padx=10)
+        ttk.Button(buttons_frame, text="取消", command=change_pwd_dialog.destroy, width=10).pack(side=tk.LEFT, padx=10)
+        
+        # 居中对话框
+        change_pwd_dialog.update_idletasks()
+        width = change_pwd_dialog.winfo_width()
+        height = change_pwd_dialog.winfo_height()
+        x = (change_pwd_dialog.winfo_screenwidth() // 2) - (width // 2)
+        y = (change_pwd_dialog.winfo_screenheight() // 2) - (height // 2)
+        change_pwd_dialog.geometry('{}x{}+{}+{}'.format(width, height, x, y))
+        
+        change_pwd_dialog.wait_window()

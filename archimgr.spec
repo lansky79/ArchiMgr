@@ -24,21 +24,6 @@ a = Analysis(
         (os.path.join(SITE_PACKAGES, 'openpyxl'), 'openpyxl'),
         (os.path.join(SITE_PACKAGES, 'et_xmlfile'), 'et_xmlfile'),
     ],
-    hiddenimports=[
-        'sqlite3',
-        'tkinter',
-        'tkinter.filedialog',
-        'tkinter.messagebox',
-        'tkinter.ttk',
-        'pandas',
-        'numpy',
-        'openpyxl',
-        'et_xmlfile',
-        'models.database',
-        'ui.main_window',
-        'config.settings',
-        'controllers.file_manager'
-    ],
     excludes=[
         'PyQt5',
         'PyQt6',
@@ -60,7 +45,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='archimgr',
+    name='档案管理系统v1.0',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -81,5 +66,5 @@ COLLECT(
     strip=False,
     upx=True,
     upx_exclude=['vcruntime140.dll', 'python312.dll'],
-    name='archimgr'
+    name='档案管理系统v1.0'
 ) 
