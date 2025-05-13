@@ -26,16 +26,6 @@ def build_executable():
         print("正在安装PyInstaller...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
     
-    # 检查UPX是否存在
-    upx_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tools', 'upx')
-    has_upx = os.path.exists(upx_dir) and len([f for f in os.listdir(upx_dir) if f.startswith('upx')]) > 0
-    
-    if not has_upx:
-        print("未找到UPX压缩工具，将创建tools/upx目录")
-        os.makedirs(upx_dir, exist_ok=True)
-        print("请从 https://github.com/upx/upx/releases 下载UPX并解压到tools/upx目录")
-        print("然后重新运行此脚本以使用UPX压缩")
-    
     # 构建命令
     build_cmd = [
         sys.executable, "-m", "PyInstaller",
@@ -49,20 +39,8 @@ def build_executable():
         "--exclude-module=scipy",
         "--exclude-module=tkinter.test",
         "--exclude-module=unittest",
+        "src/main.py"
     ]
-    
-    # 如果有UPX，添加UPX压缩选项
-    if has_upx:
-        build_cmd.extend([
-            f"--upx-dir={upx_dir}",
-            "--upx"
-        ])
-        print("将使用UPX进行压缩，这将显著减小文件大小")
-    else:
-        print("不使用UPX压缩，最终文件将会较大")
-    
-    # 添加主文件
-    build_cmd.append("src/main.py")
     
     # 执行构建
     print(f"执行命令: {' '.join(build_cmd)}")
@@ -70,28 +48,28 @@ def build_executable():
     
     print("构建完成!")
 
-def create_installer():
-    """创建安装程序"""
+def create_inno_installer():
+    """创建Inno Setup安装程序"""
     print("准备创建安装程序...")
     
     # 检查是否安装了Inno Setup
-    inno_path = r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-    if not os.path.exists(inno_path):
-        # 尝试其他可能的路径
-        alt_paths = [
-            r"C:\Program Files\Inno Setup 6\ISCC.exe",
-            r"C:\Program Files (x86)\Inno Setup 5\ISCC.exe",
-            r"C:\Program Files\Inno Setup 5\ISCC.exe"
-        ]
-        
-        for path in alt_paths:
-            if os.path.exists(path):
-                inno_path = path
-                break
-        else:
-            print("警告: 未找到Inno Setup编译器。请安装Inno Setup后再运行此脚本。")
-            print("Inno Setup下载地址: https://jrsoftware.org/isdl.php")
-            return False
+    inno_paths = [
+        r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+        r"C:\Program Files\Inno Setup 6\ISCC.exe",
+        r"C:\Program Files (x86)\Inno Setup 5\ISCC.exe",
+        r"C:\Program Files\Inno Setup 5\ISCC.exe"
+    ]
+    
+    inno_path = None
+    for path in inno_paths:
+        if os.path.exists(path):
+            inno_path = path
+            break
+    
+    if not inno_path:
+        print("警告: 未找到Inno Setup编译器。请安装Inno Setup后再运行此脚本。")
+        print("Inno Setup下载地址: https://jrsoftware.org/isdl.php")
+        return False
     
     # 创建Inno Setup脚本
     iss_script = "installer.iss"
@@ -106,9 +84,9 @@ def create_installer():
     # 获取图标文件的绝对路径
     icon_path = os.path.abspath("resources/app.ico")
     
+    # 创建Inno Setup脚本
     with open(iss_script, "w", encoding="utf-8") as f:
-        f.write(f'''
-; 档案检索系统 Inno Setup 安装脚本
+        f.write(f"""; 档案检索系统 Inno Setup 安装脚本
 
 #define MyAppName "档案检索系统"
 #define MyAppVersion "1.0"
@@ -150,7 +128,7 @@ Name: "{{{{commondesktop}}}}\{{{{#MyAppName}}}}"; Filename: "{{{{app}}}}\{{{{#My
 
 [Run]
 Filename: "{{{{app}}}}\{{{{#MyAppExeName}}}}"; Description: "{{{{cm:LaunchProgram,{{{{#StringChange(MyAppName, '&', '&&')}}}}}}}}"; Flags: nowait postinstall skipifsilent
-''')
+""")
     
     # 运行Inno Setup编译器
     print(f"使用Inno Setup创建安装程序...")
@@ -171,7 +149,7 @@ def main():
     build_executable()
     
     # 创建安装程序
-    if create_installer():
+    if create_inno_installer():
         print("\n打包过程完成! 安装程序已创建在当前目录中。")
     else:
         print("\n打包过程部分完成。可执行文件已创建，但安装程序创建失败。")

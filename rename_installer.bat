@@ -1,0 +1,6 @@
+@echo off
+echo u6b63u5728u590du5236u5e76u91cdu547du540du5b89u88c5u7a0bu5e8f...
+if exist "u6863u6848u68c0u7d22u7cfbu7edfu5b89u88c5u7a0bu5e8f.exe" copy "u6863u6848u68c0u7d22u7cfbu7edfu5b89u88c5u7a0bu5e8f.exe" "u6863u6848u68c0u7d22u7cfbu7edfu5b89u88c5u7a0bu5e8f-u4e2du6587u540du79f0.exe"
+echo u5b8cu6210!
+echo u73b0u5728u60a8u5e94u8be5u80fdu770bu5230u4e00u4e2au4e2du6587u6587u4ef6u540du7684u5b89u88c5u7a0bu5e8f
+pause
