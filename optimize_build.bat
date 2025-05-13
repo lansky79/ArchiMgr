@@ -27,7 +27,7 @@ if exist dist rmdir /s /q dist
 
 :: u4f7fu7528PyInstalleru6784u5efau53efu6267u884cu6587u4ef6uff0cu5e76u4f7fu7528UPXu538bu7f29
 echo u6b63u5728u4f7fu7528PyInstalleru6784u5efau53efu6267u884cu6587u4ef6uff08u542fu7528UPXu538bu7f29uff09...
-pyinstaller --name="u6863u6848u68c0u7d22u7cfbu7edf" --icon="resources/app.ico" --noconsole --add-data="resources;resources" --add-data="config;config" --clean --exclude-module=matplotlib --exclude-module=scipy --exclude-module=tkinter.test --exclude-module=unittest --exclude-module=numpy.random --exclude-module=numpy.f2py --upx-dir="tools/upx" src/main.py
+pyinstaller --name="u6863u6848u68c0u7d22u7cfbu7edf" --icon="resources/app.ico" --noconsole --add-data="resources;resources" --add-data="config;config" --clean --exclude-module=torch --exclude-module=huggingface_hub --exclude-module=matplotlib --exclude-module=scipy --exclude-module=PIL --exclude-module=pandas.tests --exclude-module=numpy.testing --exclude-module=numpy.distutils --exclude-module=sqlalchemy.testing --exclude-module=tkinter.test --exclude-module=unittest --exclude-module=pytest --upx-dir="tools/upx" --hidden-import=urllib3 --upx-exclude="*.dll" --upx-exclude="*.pyd" src/main.py
 
 echo u6784u5efau5b8cu6210uff01
 echo u8bf7u4f7fu7528Inno Setupu7f16u8bd1final_installer.issu6587u4ef6u521bu5efau5b89u88c5u7a0bu5e8f
