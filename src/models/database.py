@@ -6,11 +6,9 @@ import sys
 class Database:
     def __init__(self):
         """初始化数据库连接"""
-        self.db_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            'database',
-            'archimgr.db'
-        )
+        # 使用路径管理模块获取数据库路径
+        from src.utils.paths import get_database_path
+        self.db_path = get_database_path()
         
         # 确保数据库目录存在
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)

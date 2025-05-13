@@ -6,11 +6,11 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('resources', 'resources'), ('config', 'config')],
-    hiddenimports=[],
+    hiddenimports=['urllib3'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['matplotlib', 'scipy', 'tkinter.test', 'unittest', 'numpy.random', 'numpy.f2py'],
+    excludes=['torch', 'huggingface_hub', 'matplotlib', 'scipy', 'PIL', 'pandas.tests', 'numpy.testing', 'numpy.distutils', 'sqlalchemy.testing', 'tkinter.test', 'unittest', 'pytest'],
     noarchive=False,
     optimize=0,
 )
@@ -40,6 +40,6 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=True,
-    upx_exclude=[],
+    upx_exclude=['*.dll', '*.pyd'],
     name='u6863u6848u68c0u7d22u7cfbu7edf',
 )

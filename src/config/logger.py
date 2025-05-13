@@ -1,12 +1,12 @@
 import os
 import logging
 from datetime import datetime
+from src.utils.paths import get_logs_dir
 
 def setup_logger():
     """设置日志记录器"""
-    # 创建日志目录
-    log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'logs')
-    os.makedirs(log_dir, exist_ok=True)
+    # 使用路径管理模块获取日志目录
+    log_dir = get_logs_dir()
     
     # 设置日志格式
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
