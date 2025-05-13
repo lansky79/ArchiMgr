@@ -10,7 +10,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['matplotlib', 'scipy', 'tkinter.test', 'unittest'],
+    excludes=['matplotlib', 'scipy', 'tkinter.test', 'unittest', 'numpy.random', 'numpy.f2py'],
     noarchive=False,
     optimize=0,
 )
@@ -21,7 +21,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='档案检索系统',
+    name='u6863u6848u68c0u7d22u7cfbu7edf',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -41,5 +41,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='档案检索系统',
+    name='u6863u6848u68c0u7d22u7cfbu7edf',
 )
