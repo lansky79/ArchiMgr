@@ -26,6 +26,16 @@ def build_executable():
         print("正在安装PyInstaller...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
     
+    # 检查UPX是否存在
+    upx_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tools', 'upx')
+    has_upx = os.path.exists(upx_dir) and len([f for f in os.listdir(upx_dir) if f.startswith('upx')]) > 0
+    
+    if not has_upx:
+        print("未找到UPX压缩工具，将创建tools/upx目录")
+        os.makedirs(upx_dir, exist_ok=True)
+        print("请从 https://github.com/upx/upx/releases 下载UPX并解压到tools/upx目录")
+        print("然后重新运行此脚本以使用UPX压缩")
+    
     # 构建命令
     build_cmd = [
         sys.executable, "-m", "PyInstaller",
@@ -34,8 +44,25 @@ def build_executable():
         "--noconsole",
         "--add-data=resources;resources",
         "--add-data=config;config",
-        "src/main.py"
+        "--clean",  # 清理临时文件
+        "--exclude-module=matplotlib",  # 排除不必要的大型模块
+        "--exclude-module=scipy",
+        "--exclude-module=tkinter.test",
+        "--exclude-module=unittest",
     ]
+    
+    # 如果有UPX，添加UPX压缩选项
+    if has_upx:
+        build_cmd.extend([
+            f"--upx-dir={upx_dir}",
+            "--upx"
+        ])
+        print("将使用UPX进行压缩，这将显著减小文件大小")
+    else:
+        print("不使用UPX压缩，最终文件将会较大")
+    
+    # 添加主文件
+    build_cmd.append("src/main.py")
     
     # 执行构建
     print(f"执行命令: {' '.join(build_cmd)}")
