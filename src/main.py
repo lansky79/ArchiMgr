@@ -37,7 +37,7 @@ def main():
         
         # 创建GUI
         root = tk.Tk()
-        root.title(f"档案管理系统v{VERSION}")
+        root.title(f"档案检索系统v{VERSION}")
         root.geometry("1200x800")
         
         # 设置程序图标

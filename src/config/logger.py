@@ -12,12 +12,12 @@ def setup_logger():
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
     date_format = '%Y-%m-%d %H:%M:%S'
     
-    # 创建日志文件名
-    log_file = os.path.join(log_dir, f'archimgr_{datetime.now().strftime("%Y%m%d")}.log')
+    # 创建日志文件名 - 商用版使用更简洁的命名
+    log_file = os.path.join(log_dir, f'app_{datetime.now().strftime("%Y%m%d")}.log')
     
-    # 配置根日志记录器
+    # 配置根日志记录器 - 商用版使用INFO级别
     logging.basicConfig(
-        level=logging.DEBUG,  # 设置为DEBUG级别以捕获更多信息
+        level=logging.INFO,  # 商用版使用INFO级别，减少调试信息
         format=log_format,
         datefmt=date_format,
         handlers=[

@@ -17,15 +17,15 @@ class MainWindow:
         self.root = root
         self.db = db
         
-        # 设置日志级别和格式
+        # 设置日志级别和格式 - 正式版为INFO级别
         logger = logging.getLogger()
-        logger.setLevel(logging.DEBUG)
+        logger.setLevel(logging.INFO)
         
         # 确保至少有一个处理器，否则添加一个
         if not logger.handlers:
             # 创建控制台处理器
             console_handler = logging.StreamHandler()
-            console_handler.setLevel(logging.DEBUG)
+            console_handler.setLevel(logging.INFO)
             
             # 设置日志格式
             formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -37,16 +37,16 @@ class MainWindow:
             # 添加文件处理器
             log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'logs')
             os.makedirs(log_dir, exist_ok=True)
-            log_file = os.path.join(log_dir, f"debug_{time.strftime('%Y%m%d')}.log")
+            log_file = os.path.join(log_dir, f"app_{time.strftime('%Y%m%d')}.log")
             
             file_handler = logging.FileHandler(log_file, encoding='utf-8')
-            file_handler.setLevel(logging.DEBUG)
+            file_handler.setLevel(logging.INFO)
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
             
             logging.info("初始化日志系统完成")
         
-        logging.info("=== 档案管理系统启动 ===")
+        logging.info("=== 档案检索系统启动 ===")
         
         # 获取版本信息
         self.version = self.get_version()
@@ -60,6 +60,13 @@ class MainWindow:
         self.config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'config')
         os.makedirs(self.config_dir, exist_ok=True)
         self.settings_file = os.path.join(self.config_dir, 'user_settings.json')
+        
+        # 注册信息文件路径
+        self.registration_file = os.path.join(self.config_dir, 'registration.txt')
+        
+        # 检查注册状态
+        self.is_registered = self.check_registration()
+        logging.info(f"注册状态: {'已注册' if self.is_registered else '未注册'}")
         
         # 加载用户设置
         self.settings = self.load_settings()
@@ -92,6 +99,9 @@ class MainWindow:
         # 初始设置权限（未登录状态）
         self.update_menu_by_role(None)
         self.update_tools_permission(False)
+        
+        # 根据注册状态更新界面
+        self.update_ui_by_registration()
         
     def init_users_table(self):
         """初始化用户表"""
@@ -166,14 +176,12 @@ class MainWindow:
         
     def update_tools_permission(self, is_admin):
         """更新工具栏权限"""
-        if hasattr(self, 'import_category_btn'):
+        if hasattr(self, 'import_file_btn'):
             if is_admin:
-                self.import_category_btn.config(state=tk.NORMAL)
                 self.import_file_btn.config(state=tk.NORMAL)
                 # 启用清理数据库菜单
                 self.tools_menu.entryconfigure("清理数据库", state=tk.NORMAL)
             else:
-                self.import_category_btn.config(state=tk.DISABLED)
                 self.import_file_btn.config(state=tk.DISABLED)
                 # 禁用清理数据库菜单
                 self.tools_menu.entryconfigure("清理数据库", state=tk.DISABLED)
@@ -194,7 +202,7 @@ class MainWindow:
     def setup_ui(self):
         """设置用户界面"""
         # 设置窗口标题
-        self.root.title("档案管理系统")
+        self.root.title("档案检索系统")
         
         # 设置窗口大小和位置
         window_width = 1024
@@ -214,6 +222,9 @@ class MainWindow:
         # 创建主框架
         self.create_main_frame()
         
+        # 创建状态栏（最后创建，显示在底部）
+        self.create_status_bar()
+        
     def create_menu(self):
         """创建菜单栏"""
         menubar = tk.Menu(self.root)
@@ -230,11 +241,19 @@ class MainWindow:
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="帮助", menu=help_menu)
         help_menu.add_command(label="使用说明", command=self.show_help)
+        
+        # 添加用户注册选项（未注册时可用）
+        help_menu.add_command(label="用户注册", command=self.show_registration_dialog)
+        
         help_menu.add_command(label="关于", command=self.show_about)
         
         # 工具菜单
         self.tools_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="工具", menu=self.tools_menu)
+        self.tools_menu.add_command(label="打开程序安装目录", command=self.open_install_directory)
+        self.tools_menu.add_command(label="打开档案文件目录", command=self.open_archive_directory)
+        self.tools_menu.add_command(label="打开数据库位置", command=self.open_database_location)
+        self.tools_menu.add_separator()
         self.tools_menu.add_command(label="清理数据库", command=self.cleanup_database)
         
         # 用户管理菜单（初始时不显示，管理员登录后再添加）
@@ -251,14 +270,6 @@ class MainWindow:
         # 左侧按钮框架
         button_frame = ttk.Frame(toolbar_frame)
         button_frame.pack(side=tk.LEFT, padx=(0, 10))
-        
-        # 导入分类按钮
-        self.import_category_btn = ttk.Button(
-            button_frame, 
-            text="导入分类", 
-            command=self.import_categories
-        )
-        self.import_category_btn.pack(side=tk.LEFT, padx=(0, 5))
         
         # 导入文件按钮
         self.import_file_btn = ttk.Button(
@@ -304,8 +315,12 @@ class MainWindow:
         paned = ttk.PanedWindow(main_frame, orient=tk.HORIZONTAL)
         paned.pack(fill=tk.BOTH, expand=True)
         
+        # 创建白色背景样式
+        style = ttk.Style()
+        style.configure('White.TFrame', background='white')
+        
         # 创建左侧框架（用于分类树）
-        self.left_frame = ttk.Frame(paned)
+        self.left_frame = ttk.Frame(paned, style='White.TFrame')
         paned.add(self.left_frame, weight=1)
         
         # 创建右侧框架（用于文件列表）
@@ -320,14 +335,32 @@ class MainWindow:
         
     def setup_category_tree(self):
         """设置分类树"""
-        # 创建树形控件
+        # 创建树形控件，使用borderwidth=0去掉边框
         self.tree = ttk.Treeview(self.left_frame, show='tree')
+        
+        # 设置样式去掉边框和背景色
+        style = ttk.Style()
+        style.configure("Treeview", borderwidth=0, background='white')
+        # 修改选中项的背景色为蓝色，前景色（文字）为白色
+        style.map("Treeview", 
+                 background=[('selected', '#0078d7')],
+                 foreground=[('selected', 'white')])
+        
         self.tree.pack(fill=tk.BOTH, expand=True)
         
-        # 添加滚动条
+        # 添加滚动条，只在需要时显示
         scrollbar = ttk.Scrollbar(self.left_frame, orient=tk.VERTICAL, command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 配置滚动条和树形控件的关联
+        def set_scrollbar(*args):
+            # 只在内容超出可视区域时显示滚动条
+            if float(args[0]) == 0.0 and float(args[1]) == 1.0:
+                scrollbar.pack_forget()  # 隐藏滚动条
+            else:
+                scrollbar.pack(side=tk.RIGHT, fill=tk.Y)  # 显示滚动条
+        
+        self.tree.configure(yscrollcommand=set_scrollbar)
+        # 初始不显示滚动条，等待内容加载后再决定
         
         # 绑定选择事件
         self.tree.bind('<<TreeviewSelect>>', self.on_category_selected)
@@ -341,31 +374,33 @@ class MainWindow:
         list_frame = ttk.Frame(self.right_frame)
         list_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 创建Treeview，添加新的列（类号、材料名称、编号、姓名、日期、页数）
+        # 创建Treeview，添加新的列（编号、姓名、类号、材料名称、文件名、日期、页数）
         self.file_list = ttk.Treeview(
             list_frame, 
-            columns=('filename', 'class_code', 'material_name', 'file_id', 'person', 'date', 'page_count', 'path'),
+            columns=('file_id', 'person', 'class_code', 'material_name', 'filename', 'date', 'page_count', 'path'),
             show='headings'
         )
         
         # 设置列标题
-        self.file_list.heading('filename', text='文件名')
-        self.file_list.heading('class_code', text='类号')
-        self.file_list.heading('material_name', text='材料名称')
         self.file_list.heading('file_id', text='编号')
         self.file_list.heading('person', text='姓名')
+        self.file_list.heading('class_code', text='类号')
+        self.file_list.heading('material_name', text='材料名称')
+        self.file_list.heading('filename', text='文件名')
         self.file_list.heading('date', text='日期')
         self.file_list.heading('page_count', text='页数')
         self.file_list.heading('path', text='路径')
         
-        # 设置列宽度
-        self.file_list.column('filename', width=100)
-        self.file_list.column('class_code', width=50)
-        self.file_list.column('material_name', width=150)
-        self.file_list.column('file_id', width=50)
-        self.file_list.column('person', width=80)
-        self.file_list.column('date', width=80)
-        self.file_list.column('page_count', width=40)
+        # 设置除路径列外的所有列为等宽
+        equal_width = 100
+        self.file_list.column('file_id', width=equal_width)
+        self.file_list.column('person', width=equal_width)
+        self.file_list.column('class_code', width=equal_width)
+        self.file_list.column('material_name', width=equal_width)
+        self.file_list.column('filename', width=equal_width)
+        self.file_list.column('date', width=equal_width)
+        self.file_list.column('page_count', width=equal_width)
+        # 路径列保持较宽
         self.file_list.column('path', width=200)
         
         # 添加滚动条
@@ -468,11 +503,11 @@ class MainWindow:
                 
                 # 插入到列表
                 self.file_list.insert('', 'end', values=(
-                    file_name,
-                    class_code,
-                    material_name,
                     file_id,
                     person_name,
+                    class_code,
+                    material_name,
+                    file_name,
                     file_date,
                     page_count,
                     file_path
@@ -714,36 +749,49 @@ class MainWindow:
     def show_help(self):
         """显示帮助信息"""
         logging.debug("显示帮助信息")
-        help_text = """档案管理系统使用说明：
+        help_text = """档案检索系统使用说明：
 
-1. 用户登录
+1. 系统注册
+   * 初次使用请点击"帮助"菜单中的"用户注册"
+   * 输入注册码和用户名称进行注册
+   * 注册成功后重启程序即可使用全部功能
+   * 注册信息保存在程序目录下的registration.txt文件中
+
+2. 用户登录
    * 默认管理员账号: admin 密码: admin123
    * 点击"文件"菜单中的"登录"选项进入登录界面
    * 管理员可以添加新用户和修改密码
 
-2. 搜索功能
+3. 搜索功能
    * 在右上角输入姓名或编号进行搜索
    * 搜索后才能查看左侧分类目录下的文件
 
-3. 文件浏览
+4. 文件浏览
    * 左侧为档案分类目录
    * 右侧显示文件列表
    * 双击右侧文件可以打开查看
 
-4. 导入功能 (仅管理员)
-   * 导入分类: 导入档案分类结构
+5. 导入功能 (仅管理员)
    * 导入文件: 导入档案文件
 
-5. 数据管理 (仅管理员)
-   * 工具菜单中的"清理数据库"可以清理重复和无效记录
+6. 工具功能
+   * 打开程序安装目录: 打开程序所在的文件夹
+   * 打开档案文件目录: 打开档案文件存放的文件夹
+   * 打开数据库位置: 打开数据库文件所在的文件夹
+   * 清理数据库(仅管理员): 清理重复和无效记录
 """
         messagebox.showinfo("使用说明", help_text)
         
     def show_about(self):
         """显示关于信息"""
         logging.debug("显示关于信息")
-        messagebox.showinfo("关于", f"档案管理系统\n\n版本: {self.version}\n版权所有 © 2024")
         
+        # 获取注册状态
+        is_registered = hasattr(self, 'is_registered') and self.is_registered
+        registration_info = "已注册：新都区自然资源规划局" if is_registered else "未注册"
+        
+        messagebox.showinfo("关于", f"档案检索系统\n\n版本: {self.version}\n{registration_info}")
+
     def import_categories(self):
         """导入分类"""
         try:
@@ -767,6 +815,12 @@ class MainWindow:
             # 清空映射
             self.category_mapping = {}
             
+            # 中文数字映射
+            chinese_numbers = {
+                1: "一", 2: "二", 3: "三", 4: "四", 5: "五",
+                6: "六", 7: "七", 8: "八", 9: "九", 10: "十"
+            }
+            
             # 用于存储一级分类节点的字典
             parent_nodes = {}
             
@@ -786,8 +840,12 @@ class MainWindow:
             
             # 创建一级分类
             for main_num, category_name in all_main_categories:
+                # 添加中文数字前缀，使用中文顿号"、"
+                chinese_num = chinese_numbers.get(main_num, str(main_num))
+                display_text = f"{chinese_num}、{category_name}"
+                
                 # 创建树节点
-                node_id = self.tree.insert('', 'end', text=category_name)
+                node_id = self.tree.insert('', 'end', text=display_text)
                 parent_nodes[category_name] = node_id
                 
                 # 存入数据库
@@ -829,8 +887,11 @@ class MainWindow:
                         break
                 
                 if parent_category and parent_category in parent_nodes:
+                    # 添加阿拉伯数字前缀，使用中文顿号"、"
+                    display_text = f"{sub_num}、{subcat_name}"
+                    
                     # 创建树节点
-                    child_id = self.tree.insert(parent_nodes[parent_category], 'end', text=subcat_name)
+                    child_id = self.tree.insert(parent_nodes[parent_category], 'end', text=display_text)
                     
                     # 存入数据库
                     self.db.cursor.execute(
@@ -859,13 +920,14 @@ class MainWindow:
             
             logging.info(f"共导入 {len(main_categories)} 个一级分类:")
             for cat, num in main_categories:
-                logging.info(f"  一级分类: {cat}, 编码: {num}")
+                chinese_num = chinese_numbers.get(num, str(num))
+                logging.info(f"  一级分类: {chinese_num}、{cat}, 编码: {num}")
                 
                 # 检查其子分类
                 self.db.cursor.execute('SELECT category, sub_category_num FROM categories WHERE parent_category = ? ORDER BY sub_category_num', (cat,))
                 subcats = self.db.cursor.fetchall()
                 for subcat, subnum in subcats:
-                    logging.info(f"    子分类: {subcat}, 子编码: {num}-{subnum}")
+                    logging.info(f"    子分类: {subnum}、{subcat}, 子编码: {num}-{subnum}")
             
             # 打印完整的映射字典
             logging.debug("完整的分类映射字典:")
@@ -1018,18 +1080,22 @@ class MainWindow:
             # 清理之前的搜索结果
             self.file_list.delete(*self.file_list.get_children())
             
+            # 清理搜索状态
+            if not search_name and not search_id:
+                self.current_search_name = None
+                self.current_search_id = None
+                self.has_searched = False
+                messagebox.showinfo("提示", "请输入姓名或编号进行搜索")
+                return
+            
             # 保存当前搜索的人名和编号
             self.current_search_name = search_name if search_name else None
             self.current_search_id = search_id if search_id else None
             
             # 标记已进行搜索
-            self.has_searched = bool(search_name or search_id)
+            self.has_searched = True
             
             logging.info(f"执行搜索：姓名='{search_name}', 编号='{search_id}'")
-            
-            if not search_name and not search_id:
-                messagebox.showinfo("提示", "请输入姓名或编号进行搜索")
-                return
                 
             # 构建查询
             query = '''
@@ -1086,24 +1152,37 @@ class MainWindow:
         if not selected_items:
             return
         
-        # 如果没有进行过搜索，则右侧列表为空
-        if not self.has_searched:
+        # 判断是否进行过搜索，如果没有搜索过则右侧列表为空
+        if not hasattr(self, 'has_searched') or not self.has_searched:
             self.file_list.delete(*self.file_list.get_children())
             logging.info("未进行搜索，不显示文件")
-            messagebox.showinfo("提示", "请先输入姓名或编号进行搜索，再查看分类下的文件")
             return
         
         selected_item = selected_items[0]
         selected_text = self.tree.item(selected_item)['text']
         parent_item = self.tree.parent(selected_item)
         
+        # 从显示文本中提取原始分类名称（去除数字前缀）
+        # 例如：从"一、履历材料"提取"履历材料"
+        if '、' in selected_text:
+            category_name = selected_text.split('、', 1)[1]
+        else:
+            category_name = selected_text
+        
         try:
             if parent_item:  # 二级分类
                 parent_text = self.tree.item(parent_item)['text']
-                category_key = (parent_text, selected_text)
+                
+                # 从父分类显示文本中提取原始名称
+                if '、' in parent_text:
+                    parent_category_name = parent_text.split('、', 1)[1]
+                else:
+                    parent_category_name = parent_text
+                
+                category_key = (parent_category_name, category_name)
                 category_code = self.category_mapping.get(category_key)
                 
-                logging.debug(f"二级分类选择: {parent_text} -> {selected_text}")
+                logging.debug(f"二级分类选择: {parent_category_name} -> {category_name}")
                 logging.debug(f"二级分类编码: {category_code}")
                 
                 if category_code:
@@ -1123,7 +1202,7 @@ class MainWindow:
                     params = [f'{category_code}-%', f'{category_code.replace("-", ".")}%']
                     
                     # 如果有搜索条件，添加人名过滤
-                    if self.current_search_name:
+                    if hasattr(self, 'current_search_name') and self.current_search_name:
                         query += ' AND person_name LIKE ?'
                         params.append(f'%{self.current_search_name}%')
                     
@@ -1144,9 +1223,9 @@ class MainWindow:
                 else:
                     logging.warning(f"未找到分类编码: {category_key}")
             else:  # 一级分类
-                category_code = self.category_mapping.get(selected_text)
+                category_code = self.category_mapping.get(category_name)
                 
-                logging.debug(f"一级分类选择: {selected_text}")
+                logging.debug(f"一级分类选择: {category_name}")
                 logging.debug(f"一级分类编码: {category_code}")
                 
                 if category_code:
@@ -1155,7 +1234,7 @@ class MainWindow:
                         SELECT COUNT(*) 
                         FROM categories 
                         WHERE parent_category = ?
-                    ''', (selected_text,))
+                    ''', (category_name,))
                     
                     has_subcategories = self.db.cursor.fetchone()[0] > 0
                     
@@ -1179,7 +1258,7 @@ class MainWindow:
                         params = [f'{category_code}-%', f'{category_code}.%']
                         
                         # 如果有搜索条件，添加人名过滤
-                        if self.current_search_name:
+                        if hasattr(self, 'current_search_name') and self.current_search_name:
                             query += ' AND person_name LIKE ?'
                             params.append(f'%{self.current_search_name}%')
                         
@@ -1255,6 +1334,63 @@ class MainWindow:
             logging.error(f"加载文件失败: {str(e)}")
             self.all_files = []
 
+    def open_install_directory(self):
+        """打开程序安装目录"""
+        try:
+            install_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            logging.info(f"打开程序安装目录: {install_dir}")
+            if os.path.exists(install_dir):
+                # 使用系统默认的文件浏览器打开目录
+                os.startfile(install_dir)
+            else:
+                messagebox.showerror("错误", "程序安装目录不存在")
+        except Exception as e:
+            logging.error(f"打开程序安装目录失败: {str(e)}")
+            messagebox.showerror("错误", f"打开程序安装目录失败: {str(e)}")
+    
+    def open_archive_directory(self):
+        """打开档案文件目录"""
+        try:
+            # 从设置中获取档案文件目录，如果没有则使用默认目录
+            archive_dir = self.settings.get('import_root_dir')
+            if not archive_dir or not os.path.exists(archive_dir):
+                # 如果没有设置或目录不存在，询问用户选择目录
+                messagebox.showinfo("提示", "档案文件目录未设置或不存在，请选择档案文件目录")
+                archive_dir = filedialog.askdirectory(title="选择档案文件目录")
+                if archive_dir:
+                    # 保存到设置中
+                    self.settings['import_root_dir'] = archive_dir
+                    self.save_settings()
+                else:
+                    return
+            
+            logging.info(f"打开档案文件目录: {archive_dir}")
+            # 使用系统默认的文件浏览器打开目录
+            os.startfile(archive_dir)
+        except Exception as e:
+            logging.error(f"打开档案文件目录失败: {str(e)}")
+            messagebox.showerror("错误", f"打开档案文件目录失败: {str(e)}")
+    
+    def open_database_location(self):
+        """打开数据库位置"""
+        try:
+            # 获取数据库文件路径
+            if hasattr(self.db, 'db_path') and self.db.db_path:
+                db_dir = os.path.dirname(self.db.db_path)
+            else:
+                # 如果没有明确的数据库路径，使用默认位置
+                db_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'data')
+            
+            logging.info(f"打开数据库位置: {db_dir}")
+            if os.path.exists(db_dir):
+                # 使用系统默认的文件浏览器打开目录
+                os.startfile(db_dir)
+            else:
+                messagebox.showerror("错误", "数据库目录不存在")
+        except Exception as e:
+            logging.error(f"打开数据库位置失败: {str(e)}")
+            messagebox.showerror("错误", f"打开数据库位置失败: {str(e)}")
+    
     def cleanup_database(self):
         """清理数据库中的重复记录和无效记录"""
         try:
@@ -1284,14 +1420,9 @@ class MainWindow:
     def init_data(self):
         """初始化数据：加载分类树和文件列表"""
         try:
-            # 检查分类树是否已存在
-            self.db.cursor.execute('SELECT COUNT(*) FROM categories')
-            categories_count = self.db.cursor.fetchone()[0]
-            
-            if categories_count > 0:
-                # 如果存在分类数据，直接加载
-                self.load_categories_from_db()
-                logging.info(f"从数据库加载了 {categories_count} 条分类记录")
+            # 加载分类树（不依赖数据库）
+            self.load_categories_from_db()
+            logging.info("已加载分类树结构")
             
             # 检查文件记录是否存在
             self.db.cursor.execute('SELECT COUNT(*) FROM person_files')
@@ -1301,52 +1432,93 @@ class MainWindow:
                 # 如果存在文件记录，直接加载
                 self.load_files_from_db()
                 logging.info(f"从数据库加载了 {files_count} 条文件记录")
-            
+                
         except Exception as e:
-            logging.error(f"初始化数据失败: {str(e)}")
+            logging.error(f"初始化数据失败: {str(e)}", exc_info=True)
             messagebox.showerror("错误", f"初始化数据失败：{str(e)}")
 
     def load_categories_from_db(self):
-        """从数据库加载分类树并构建映射"""
+        """加载分类树并构建映射（不依赖数据库，直接在代码中写死）"""
         try:
             # 清空现有树和映射
             self.tree.delete(*self.tree.get_children())
             self.category_mapping = {}
             
-            # 先加载一级分类
-            self.db.cursor.execute('''
-                SELECT category, main_category_num 
-                FROM categories 
-                WHERE parent_category IS NULL
-                ORDER BY main_category_num
-            ''')
+            # 中文数字映射
+            chinese_numbers = {
+                1: "一", 2: "二", 3: "三", 4: "四", 5: "五",
+                6: "六", 7: "七", 8: "八", 9: "九", 10: "十"
+            }
             
+            # 手动定义所有一级分类
+            all_main_categories = [
+                (1, "履历材料"),
+                (2, "自传材料"),
+                (3, "鉴定、考核材料"),
+                (4, "学历学位、职称、学术、培训等材料"),
+                (5, "政审材料"),
+                (6, "党团材料"),
+                (7, "奖励材料"),
+                (8, "处分材料"),
+                (9, "工资、任免、出国、会议等材料"),
+                (10, "其他材料")
+            ]
+            
+            # 创建一级分类节点和映射
             parent_nodes = {}
-            for category, main_num in self.db.cursor.fetchall():
-                node_id = self.tree.insert('', 'end', text=category)
+            for main_num, category in all_main_categories:
+                # 添加中文数字前缀，使用中文顿号"、"
+                chinese_num = chinese_numbers.get(main_num, str(main_num))
+                display_text = f"{chinese_num}、{category}"
+                
+                # 创建树节点
+                node_id = self.tree.insert('', 'end', text=display_text)
                 parent_nodes[category] = node_id
+                
                 # 添加一级分类映射
-                if main_num is not None:
-                    self.category_mapping[category] = str(main_num)
-                    logging.debug(f"添加一级分类映射: {category} -> {main_num}")
+                self.category_mapping[category] = str(main_num)
+                logging.debug(f"添加一级分类映射: {category} -> {main_num}")
             
-            # 再加载二级分类
-            self.db.cursor.execute('''
-                SELECT c.category, c.parent_category, c.main_category_num, c.sub_category_num
-                FROM categories c
-                WHERE c.parent_category IS NOT NULL
-                ORDER BY c.main_category_num, c.sub_category_num
-            ''')
+            # 手动定义第4类的二级分类
+            subcategories_4 = [
+                (4, 1, "学历学位材料"),
+                (4, 2, "专业技术职务材料"),
+                (4, 3, "科研学术材料"),
+                (4, 4, "培训材料")
+            ]
             
-            for category, parent_category, main_num, sub_num in self.db.cursor.fetchall():
-                if parent_category in parent_nodes:
-                    self.tree.insert(parent_nodes[parent_category], 'end', text=category)
+            # 手动定义第9类的二级分类
+            subcategories_9 = [
+                (9, 1, "工资材料"),
+                (9, 2, "任免材料"),
+                (9, 3, "出国（境）审批材料"),
+                (9, 4, "会议代表材料")
+            ]
+            
+            # 合并所有二级分类
+            all_subcategories = subcategories_4 + subcategories_9
+            
+            # 创建二级分类节点和映射
+            for main_num, sub_num, category in all_subcategories:
+                # 查找父分类
+                parent_category = None
+                for name, code in self.category_mapping.items():
+                    if code == str(main_num) and not isinstance(name, tuple):
+                        parent_category = name
+                        break
+                
+                if parent_category and parent_category in parent_nodes:
+                    # 添加阿拉伯数字前缀，使用中文顿号"、"
+                    display_text = f"{sub_num}、{category}"
+                    
+                    # 创建树节点
+                    child_id = self.tree.insert(parent_nodes[parent_category], 'end', text=display_text)
+                    
                     # 添加二级分类映射
-                    if main_num is not None and sub_num is not None:
-                        key = (parent_category, category)
-                        value = f"{main_num}-{sub_num}"
-                        self.category_mapping[key] = value
-                        logging.debug(f"添加二级分类映射: {key} -> {value}")
+                    key = (parent_category, category)
+                    value = f"{main_num}-{sub_num}"
+                    self.category_mapping[key] = value
+                    logging.debug(f"添加二级分类映射: {key} -> {value}")
             
             # 打印完整的映射字典
             logging.debug("完整的分类映射字典:")
@@ -1358,8 +1530,9 @@ class MainWindow:
                 
         except Exception as e:
             logging.error(f"加载分类树失败: {str(e)}", exc_info=True)
-            raise
-
+            # 如果出错，不抛出异常，只记录日志
+            pass
+            
     def get_excel_info(self, person_name, class_code):
         """从Excel获取文件相关信息"""
         try:
@@ -1777,3 +1950,257 @@ class MainWindow:
         change_pwd_dialog.geometry('{}x{}+{}+{}'.format(width, height, x, y))
         
         change_pwd_dialog.wait_window()
+    
+    def check_registration(self):
+        """检查是否已注册"""
+        try:
+            # 检查配置目录下的注册文件是否存在
+            config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'config')
+            if not os.path.exists(config_dir):
+                os.makedirs(config_dir, exist_ok=True)
+                
+            registration_file = os.path.join(config_dir, 'registration.dat')
+            
+            if os.path.exists(registration_file):
+                with open(registration_file, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    # 简单加密处理
+                    decoded_content = ''.join([chr(ord(c) - 1) for c in content])
+                    parts = decoded_content.split('|')
+                    if len(parts) >= 2:
+                        reg_code = parts[0].strip()
+                        user_name = parts[1].strip()
+                        # 验证注册码和用户名
+                        if reg_code == "2xdqzr5zyghj" and user_name == "新都区自然资源规划局":
+                            logging.info(f"注册验证成功: {user_name}")
+                            return True
+        
+            # 如果没有找到有效的注册文件，返回False（未注册）
+            logging.info("系统未注册")
+            return False
+        except Exception as e:
+            logging.error(f"检查注册状态失败: {str(e)}")
+            # 如果出错，返回False（默认未注册）
+            return False
+    
+    def update_ui_by_registration(self):
+        """根据注册状态更新界面"""
+        try:
+            if not self.is_registered:
+                # 未注册状态：禁用大部分功能，保留帮助菜单和退出选项
+                # 禁用工具栏按钮
+                if hasattr(self, 'import_category_btn'):
+                    self.import_category_btn.config(state=tk.DISABLED)
+                if hasattr(self, 'import_file_btn'):
+                    self.import_file_btn.config(state=tk.DISABLED)
+                
+                # 禁用搜索框
+                for widget in self.root.winfo_children():
+                    if isinstance(widget, ttk.Frame):
+                        for child in widget.winfo_children():
+                            if isinstance(child, ttk.Frame):
+                                for subchild in child.winfo_children():
+                                    if isinstance(subchild, ttk.Entry):
+                                        subchild.config(state=tk.DISABLED)
+                
+                # 有选择地禁用文件菜单项，保留退出功能
+                if hasattr(self, 'file_menu'):
+                    # 遍历所有菜单项
+                    for i in range(self.file_menu.index('end') + 1):
+                        try:
+                            # 获取菜单项标签
+                            label = self.file_menu.entrycget(i, 'label')
+                            # 如果不是退出相关选项，则禁用
+                            if label != '退出' and label != '登录':
+                                self.file_menu.entryconfigure(i, state=tk.DISABLED)
+                        except:
+                            pass
+                
+                # 禁用工具菜单
+                if hasattr(self, 'tools_menu'):
+                    for i in range(self.tools_menu.index('end') + 1):
+                        try:
+                            self.tools_menu.entryconfigure(i, state=tk.DISABLED)
+                        except:
+                            pass
+                
+                # 确保用户注册菜单项可用（在帮助菜单中）
+                menubar = self.root.nametowidget(self.root['menu'])
+                for i in range(menubar.index('end') + 1):
+                    try:
+                        if menubar.entrycget(i, 'label') == '帮助':
+                            help_menu = menubar.nametowidget(menubar.entrycget(i, 'menu'))
+                            for j in range(help_menu.index('end') + 1):
+                                try:
+                                    # 确保所有帮助菜单项可用
+                                    help_menu.entryconfigure(j, state=tk.NORMAL)
+                                except:
+                                    pass
+                            break
+                    except:
+                        pass
+                
+                # 更新状态栏显示未注册信息
+                if hasattr(self, 'status_var'):
+                    self.status_var.set("未注册")
+                
+                logging.info("已设置为未注册状态界面")
+            else:
+                # 已注册状态：启用所有功能，隐藏注册菜单项
+                logging.info("已设置为已注册状态界面")
+                
+                # 隐藏用户注册菜单项
+                menubar = self.root.nametowidget(self.root['menu'])
+                for i in range(menubar.index('end') + 1):
+                    try:
+                        if menubar.entrycget(i, 'label') == '帮助':
+                            help_menu = menubar.nametowidget(menubar.entrycget(i, 'menu'))
+                            for j in range(help_menu.index('end') + 1):
+                                try:
+                                    if help_menu.entrycget(j, 'label') == '用户注册':
+                                        help_menu.entryconfigure(j, state=tk.DISABLED)
+                                except:
+                                    pass
+                            break
+                    except:
+                        pass
+                
+                # 更新状态栏显示已注册信息
+                if hasattr(self, 'status_var'):
+                    self.status_var.set("已注册：新都区自然资源规划局")
+        
+        except Exception as e:
+            logging.error(f"更新界面失败: {str(e)}")
+    
+    def register_system(self, reg_code, user_name):
+        """注册系统"""
+        try:
+            # 验证注册码和用户名
+            if reg_code == "2xdqzr5zyghj" and user_name == "新都区自然资源规划局":
+                # 确保配置目录存在
+                config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'config')
+                if not os.path.exists(config_dir):
+                    os.makedirs(config_dir, exist_ok=True)
+                    
+                # 保存注册信息到加密文件
+                registration_file = os.path.join(config_dir, 'registration.dat')
+                
+                # 简单加密处理（每个字符ASCII码+1）
+                encoded_content = ''.join([chr(ord(c) + 1) for c in f"{reg_code}|{user_name}"])
+                
+                with open(registration_file, 'w', encoding='utf-8') as f:
+                    f.write(encoded_content)
+                
+                self.is_registered = True
+                logging.info(f"系统注册成功: {user_name}")
+                
+                # 更新状态栏
+                if hasattr(self, 'status_var'):
+                    self.status_var.set(f"已注册：{user_name}")
+                
+                # 更新界面
+                self.update_ui_by_registration()
+                
+                # 重启应用以应用注册
+                messagebox.showinfo("注册成功", "系统已成功注册！请重启应用程序以应用所有功能。")
+                return True
+            else:
+                logging.warning(f"注册失败: 无效的注册码或用户名")
+                messagebox.showerror("注册失败", "无效的注册码或用户名，请联系系统管理员。")
+                return False
+        except Exception as e:
+            logging.error(f"注册系统失败: {str(e)}")
+            messagebox.showerror("注册错误", f"注册系统时发生错误：{str(e)}")
+            return False
+    
+    def show_registration_dialog(self):
+        """显示注册对话框"""
+        logging.debug("显示注册对话框")
+        
+        # 创建注册对话框
+        reg_dialog = tk.Toplevel(self.root)
+        reg_dialog.title("系统注册")
+        reg_dialog.geometry("350x200")
+        reg_dialog.resizable(False, False)
+        reg_dialog.transient(self.root)
+        reg_dialog.grab_set()
+        
+        # 表单框架
+        form_frame = ttk.Frame(reg_dialog, padding=20)
+        form_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 注册码
+        ttk.Label(form_frame, text="注册码:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        reg_code_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=reg_code_var, width=25).grid(row=0, column=1, pady=5)
+        
+        # 用户名称
+        ttk.Label(form_frame, text="用户名称:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        user_name_var = tk.StringVar()
+        ttk.Entry(form_frame, textvariable=user_name_var, width=25).grid(row=1, column=1, pady=5)
+        
+        # 错误信息
+        error_var = tk.StringVar()
+        error_label = ttk.Label(form_frame, textvariable=error_var, foreground="red")
+        error_label.grid(row=2, column=0, columnspan=2, pady=5)
+        
+        # 注册按钮处理函数
+        def do_register():
+            reg_code = reg_code_var.get().strip()
+            user_name = user_name_var.get().strip()
+            
+            # 验证表单
+            if not reg_code:
+                error_var.set("注册码不能为空")
+                return
+            
+            if not user_name:
+                error_var.set("用户名称不能为空")
+                return
+            
+            # 注册系统
+            if self.register_system(reg_code, user_name):
+                reg_dialog.destroy()
+            else:
+                error_var.set("注册失败: 无效的注册码或用户名")
+        
+        # 创建一个按钮框架
+        buttons_frame = ttk.Frame(form_frame)
+        buttons_frame.grid(row=3, column=0, columnspan=2, pady=15)
+        
+        # 添加按钮
+        ttk.Button(buttons_frame, text="确定", command=do_register, width=10).pack(side=tk.LEFT, padx=15)
+        ttk.Button(buttons_frame, text="取消", command=reg_dialog.destroy, width=10).pack(side=tk.LEFT, padx=15)
+        
+        # 居中对话框
+        reg_dialog.update_idletasks()
+        width = reg_dialog.winfo_width()
+        height = reg_dialog.winfo_height()
+        x = (reg_dialog.winfo_screenwidth() // 2) - (width // 2)
+        y = (reg_dialog.winfo_screenheight() // 2) - (height // 2)
+        reg_dialog.geometry('{}x{}+{}+{}'.format(width, height, x, y))
+        
+        reg_dialog.wait_window()
+
+    def create_status_bar(self):
+        """创建底部状态栏"""
+        # 创建状态栏框架
+        self.status_bar = ttk.Frame(self.root, relief=tk.SUNKEN, padding=(1, 1))
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # 创建状态标签
+        self.status_var = tk.StringVar()
+        if hasattr(self, 'is_registered') and self.is_registered:
+            self.status_var.set("已注册：新都区自然资源规划局")
+        else:
+            self.status_var.set("未注册")
+            
+        status_label = ttk.Label(self.status_bar, textvariable=self.status_var)
+        status_label.pack(side=tk.LEFT, padx=5, pady=2)
+        
+        # 分隔符
+        ttk.Separator(self.status_bar, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
+        
+        # 版本信息
+        version_label = ttk.Label(self.status_bar, text=f"版本: {self.version}")
+        version_label.pack(side=tk.LEFT, padx=5)
