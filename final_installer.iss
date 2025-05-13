@@ -14,15 +14,15 @@ SolidCompression=yes
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Files]
-Source: "dist\档案检索系统\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\u6863u6848u68c0u7d22u7cfbu7edf\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\档案检索系统"; Filename: "{app}\档案检索系统.exe"
+Name: "{group}\档案检索系统"; Filename: "{app}\u6863u6848u68c0u7d22u7cfbu7edf.exe"
 Name: "{group}\卸载"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\档案检索系统"; Filename: "{app}\档案检索系统.exe"
+Name: "{commondesktop}\档案检索系统"; Filename: "{app}\u6863u6848u68c0u7d22u7cfbu7edf.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\档案检索系统.exe"; Description: "立即启动程序"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\u6863u6848u68c0u7d22u7cfbu7edf.exe"; Description: "立即启动程序"; Flags: nowait postinstall skipifsilent
 
 [Messages]
 WelcomeLabel1=欢迎使用档案检索系统安装向导
