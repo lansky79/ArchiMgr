@@ -19,7 +19,7 @@ Source: "dist\u6863u6848u68c0u7d22u7cfbu7edf\*"; DestDir: "{app}"; Flags: ignore
 [Icons]
 Name: "{group}\档案检索系统"; Filename: "{app}\u6863u6848u68c0u7d22u7cfbu7edf.exe"
 Name: "{group}\卸载"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\档案检索系统"; Filename: "{app}\u6863u6848u68c0u7d22u7cfbu7edf.exe"; Tasks: desktopicon
+Name: "{commondesktop}\档案检索系统"; Filename: "{app}\u6863u6848u68c0u7d22u7cfbu7edf.exe"
 
 [Run]
 Filename: "{app}\u6863u6848u68c0u7d22u7cfbu7edf.exe"; Description: "立即启动程序"; Flags: nowait postinstall skipifsilent
