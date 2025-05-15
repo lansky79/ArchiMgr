@@ -177,12 +177,25 @@ class MainWindow:
     def update_tools_permission(self, is_admin):
         """更新工具栏权限"""
         if hasattr(self, 'import_file_btn'):
-            if is_admin:
+            # 搜索按钮和导入文件按钮状态 - 只要登录了（无论是管理员还是普通用户）就可以使用
+            if self.current_user:  # 如果已登录（任何角色）
+                # 启用搜索按钮
+                if hasattr(self, 'search_button'):
+                    self.search_button.config(state=tk.NORMAL)
+                # 启用导入文件按钮
                 self.import_file_btn.config(state=tk.NORMAL)
+            else:  # 未登录
+                # 禁用搜索按钮
+                if hasattr(self, 'search_button'):
+                    self.search_button.config(state=tk.DISABLED)
+                # 禁用导入文件按钮
+                self.import_file_btn.config(state=tk.DISABLED)
+            
+            # 管理员特有权限
+            if is_admin:
                 # 启用清理数据库菜单
                 self.tools_menu.entryconfigure("清理数据库", state=tk.NORMAL)
             else:
-                self.import_file_btn.config(state=tk.DISABLED)
                 # 禁用清理数据库菜单
                 self.tools_menu.entryconfigure("清理数据库", state=tk.DISABLED)
 
@@ -302,8 +315,8 @@ class MainWindow:
         id_entry.pack(side=tk.LEFT, padx=(0, 10))
         
         # 搜索按钮
-        search_button = ttk.Button(search_frame, text="搜索", command=self.search_person)
-        search_button.pack(side=tk.LEFT)
+        self.search_button = ttk.Button(search_frame, text="搜索", command=self.search_person)
+        self.search_button.pack(side=tk.LEFT)
         
     def create_main_frame(self):
         """创建主框架"""
@@ -520,6 +533,90 @@ class MainWindow:
     def hash_password(self, password):
         """对密码进行哈希加密"""
         return hashlib.sha256(password.encode()).hexdigest()
+        
+    def get_excel_info(self, dir_name, class_code):
+        """从Excel文件中获取材料名称、日期和页数信息"""
+        try:
+            # 默认值
+            material_name = ""
+            file_date = ""
+            page_count = ""
+            
+            # 查找目录下的Excel文件
+            if self.import_root_dir and os.path.exists(self.import_root_dir):
+                person_dir = os.path.join(self.import_root_dir, dir_name)
+                if os.path.exists(person_dir):
+                    excel_files = [f for f in os.listdir(person_dir) if f.lower().endswith(('.xls', '.xlsx'))]
+                    
+                    if excel_files:
+                        excel_path = os.path.join(person_dir, excel_files[0])
+                        logging.info(f"找到Excel文件: {excel_path}")
+                        
+                        try:
+                            # 读取Excel文件
+                            df = pd.read_excel(excel_path)
+                            
+                            # 查找匹配的类号行
+                            # 尝试不同的列名，因为Excel文件格式可能不同
+                            possible_code_columns = ['类号', '分类号', '编号', '代码']
+                            possible_name_columns = ['材料名称', '名称', '内容']
+                            possible_date_columns = ['日期', '时间', '形成日期']
+                            possible_page_columns = ['页数', '页码数', '页']
+                            
+                            # 查找实际的列名
+                            code_col = None
+                            for col in possible_code_columns:
+                                if col in df.columns:
+                                    code_col = col
+                                    break
+                                    
+                            name_col = None
+                            for col in possible_name_columns:
+                                if col in df.columns:
+                                    name_col = col
+                                    break
+                                    
+                            date_col = None
+                            for col in possible_date_columns:
+                                if col in df.columns:
+                                    date_col = col
+                                    break
+                                    
+                            page_col = None
+                            for col in possible_page_columns:
+                                if col in df.columns:
+                                    page_col = col
+                                    break
+                            
+                            if code_col:
+                                # 转换为字符串进行比较
+                                df[code_col] = df[code_col].astype(str)
+                                
+                                # 查找匹配的行
+                                matching_rows = df[df[code_col].str.strip() == class_code.strip()]
+                                
+                                if not matching_rows.empty:
+                                    # 获取第一个匹配行的信息
+                                    row = matching_rows.iloc[0]
+                                    
+                                    if name_col and name_col in row.index:
+                                        material_name = str(row[name_col])
+                                    
+                                    if date_col and date_col in row.index:
+                                        file_date = str(row[date_col])
+                                    
+                                    if page_col and page_col in row.index:
+                                        page_count = str(row[page_col])
+                                        
+                                    logging.info(f"从Excel获取到信息: 材料名称={material_name}, 日期={file_date}, 页数={page_count}")
+                        except Exception as e:
+                            logging.error(f"读取Excel文件失败: {str(e)}")
+            
+            return material_name, file_date, page_count
+            
+        except Exception as e:
+            logging.error(f"获取Excel信息失败: {str(e)}")
+            return "", "", ""
     
     def register_user(self, username, password, real_name):
         """注册新用户"""
@@ -763,16 +860,21 @@ class MainWindow:
    * 管理员可以添加新用户和修改密码
 
 3. 搜索功能
-   * 在右上角输入姓名或编号进行搜索
+   * 登录后在右上角输入姓名或编号进行搜索
+   * 搜索时使用精确匹配，请输入完整姓名或编号
+   * 当有同名档案时，系统会提示输入编号进行精确搜索
    * 搜索后才能查看左侧分类目录下的文件
+   * 搜索结果会显示材料名称、日期和页数（来自目录中的Excel文件）
 
 4. 文件浏览
    * 左侧为档案分类目录
    * 右侧显示文件列表
    * 双击右侧文件可以打开查看
 
-5. 导入功能 (仅管理员)
-   * 导入文件: 导入档案文件
+5. 导入功能
+   * 导入文件: 导入档案文件（所有登录用户可用）
+   * 每次文件目录或Excel文件发生变化时，需要重新导入
+   * 导入时会读取目录中的Excel文件，获取材料名称、日期和页数信息
 
 6. 工具功能
    * 打开程序安装目录: 打开程序所在的文件夹
@@ -966,7 +1068,21 @@ class MainWindow:
             # 遍历文件夹
             imported_count = 0
             for root, _, files in os.walk(folder_path):
-                person_name = os.path.basename(root)
+                dir_name = os.path.basename(root)
+                
+                # 从目录名中提取编号和人名
+                # 正则表达式提取开头的连续数字作为编号
+                match = re.match(r'^(\d+)(.*)', dir_name)
+                file_id = ""
+                person_name = dir_name
+                
+                if match:
+                    file_id = match.group(1)
+                    # 处理姓名，去掉数字部分只保留人名
+                    person_name = match.group(2).strip()
+                
+                logging.debug(f"处理目录: {dir_name}, 编号: {file_id}, 人名: {person_name}")
+                
                 for file in files:
                     if file.startswith('.') or file.startswith('~'):
                         continue
@@ -976,9 +1092,9 @@ class MainWindow:
                     abs_path = os.path.abspath(file_path)
                     
                     self.db.cursor.execute('''
-                        INSERT INTO person_files (person_name, file_name, file_path)
-                        VALUES (?, ?, ?)
-                    ''', (person_name, file, abs_path))
+                        INSERT INTO person_files (person_name, file_name, file_path, dir_name, file_id)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (person_name, file, abs_path, dir_name, file_id))
                     imported_count += 1
             
             self.db.conn.commit()
@@ -1046,6 +1162,16 @@ class MainWindow:
                             file_path = os.path.join(root, file)
                             abs_path = os.path.abspath(file_path)
                             
+                            # 从目录名中提取编号和人名
+                            match = re.match(r'^(\d+)(.*)', person_folder)
+                            file_id = ""
+                            dir_name = person_folder
+                            
+                            if match:
+                                file_id = match.group(1)
+                                # 如果人名不是从目录名提取的，则保持原来的人名
+                                # person_name = match.group(2).strip()
+                            
                             # 检查文件是否已存在
                             self.db.cursor.execute('''
                                 SELECT COUNT(*) FROM person_files 
@@ -1054,11 +1180,11 @@ class MainWindow:
                             
                             if self.db.cursor.fetchone()[0] == 0:
                                 self.db.cursor.execute('''
-                                    INSERT INTO person_files (person_name, file_name, file_path)
-                                    VALUES (?, ?, ?)
-                                ''', (person_name, file, abs_path))
+                                    INSERT INTO person_files (person_name, file_name, file_path, dir_name, file_id)
+                                    VALUES (?, ?, ?, ?, ?)
+                                ''', (person_name, file, abs_path, dir_name, file_id))
                                 file_count += 1
-                    
+                        
                     imported_count += 1
             
             self.db.conn.commit()
@@ -1096,7 +1222,38 @@ class MainWindow:
             self.has_searched = True
             
             logging.info(f"执行搜索：姓名='{search_name}', 编号='{search_id}'")
+            
+            # 如果只有姓名没有编号，先检查是否有同名档案
+            if search_name and not search_id:
+                # 查询完全匹配的同名档案
+                check_query = '''
+                    SELECT COUNT(DISTINCT dir_name) 
+                    FROM person_files 
+                    WHERE person_name = ?
+                '''
+                self.db.cursor.execute(check_query, (search_name,))
+                same_name_count = self.db.cursor.fetchone()[0]
                 
+                if same_name_count > 1:
+                    # 如果有多个同名档案，提示用户输入编号
+                    messagebox.showinfo("提示", f"发现{same_name_count}个同名档案，请输入编号进行精确搜索")
+                    
+                    # 获取这些同名档案的编号信息并显示
+                    id_query = '''
+                        SELECT DISTINCT dir_name, file_id 
+                        FROM person_files 
+                        WHERE person_name = ?
+                    '''
+                    self.db.cursor.execute(id_query, (search_name,))
+                    id_results = self.db.cursor.fetchall()
+                    
+                    id_info = "同名档案编号信息:\n"
+                    for dir_name, file_id in id_results:
+                        id_info += f"{dir_name}: {file_id}\n"
+                    
+                    messagebox.showinfo("编号信息", id_info)
+                    return
+            
             # 构建查询
             query = '''
                 SELECT DISTINCT file_name, file_path 
@@ -1107,15 +1264,15 @@ class MainWindow:
             '''
             params = []
             
-            # 添加人名过滤条件
+            # 添加人名过滤条件 - 使用完全匹配而非模糊匹配
             if search_name:
-                query += ' AND person_name LIKE ?'
-                params.append(f'%{search_name}%')
+                query += ' AND person_name = ?'  # 使用精确匹配
+                params.append(search_name)
             
             # 添加编号过滤条件
             if search_id:
-                query += ' AND (file_path LIKE ? OR person_name LIKE ?)'
-                params.extend([f'%{search_id}%', f'%{search_id}%'])
+                query += ' AND file_id = ?'  # 使用精确匹配
+                params.append(search_id)
             
             query += ' ORDER BY file_name'
             
