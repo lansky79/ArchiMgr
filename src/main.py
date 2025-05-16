@@ -26,7 +26,7 @@ from src.ui.main_window import MainWindow
 from src.config.logger import setup_logger
 
 # 应用程序常量
-VERSION = "1.0"
+VERSION = "1.0(0516)"
 
 def main():
     """程序入口点函数"""
@@ -60,7 +60,7 @@ def main():
             # 继续运行，不因图标问题而终止
         
         # 创建主窗口
-        main_window = MainWindow(root, db)
+        main_window = MainWindow(root, db, version=VERSION)
         
         # 进入主循环
         root.mainloop()

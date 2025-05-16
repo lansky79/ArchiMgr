@@ -13,9 +13,10 @@ import json
 import hashlib
 
 class MainWindow:
-    def __init__(self, root, db=None):
+    def __init__(self, root, db=None, version="1.0"):
         self.root = root
         self.db = db
+        self.version = version
         
         # 设置日志级别和格式 - 正式版为INFO级别
         logger = logging.getLogger()
@@ -48,8 +49,6 @@ class MainWindow:
         
         logging.info("=== 档案检索系统启动 ===")
         
-        # 获取版本信息
-        self.version = self.get_version()
         logging.info(f"系统版本: {self.version}")
         
         # 初始化文件列表和分类映射
@@ -199,19 +198,6 @@ class MainWindow:
                 # 禁用清理数据库菜单
                 self.tools_menu.entryconfigure("清理数据库", state=tk.DISABLED)
 
-    def get_version(self):
-        """获取系统版本号"""
-        version_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'version.txt')
-        if os.path.exists(version_file):
-            try:
-                with open(version_file, 'r') as f:
-                    return f.read().strip()
-            except Exception as e:
-                logging.error(f"读取版本文件失败: {str(e)}")
-                return "1.0.0"
-        else:
-            return "1.0.0"
-        
     def setup_ui(self):
         """设置用户界面"""
         # 设置窗口标题
@@ -535,6 +521,74 @@ class MainWindow:
         return hashlib.sha256(password.encode()).hexdigest()
         
     def get_excel_info(self, dir_name, class_code):
+        """从Excel文件中获取材料名称、日期和页数信息（严格匹配编号+姓名.xlsx/.xls）"""
+        try:
+            material_name = ""
+            file_date = ""
+            page_count = ""
+            if self.import_root_dir and os.path.exists(self.import_root_dir):
+                person_dir = os.path.join(self.import_root_dir, dir_name)
+                if os.path.exists(person_dir):
+                    match = re.match(r'^(\d+)(.+)$', dir_name)
+                    if match:
+                        file_id = match.group(1)
+                        person_name = match.group(2).strip()
+                        expected_xlsx = f"{file_id}{person_name}.xlsx"
+                        expected_xls = f"{file_id}{person_name}.xls"
+                        excel_path = None
+                        if os.path.exists(os.path.join(person_dir, expected_xlsx)):
+                            excel_path = os.path.join(person_dir, expected_xlsx)
+                        elif os.path.exists(os.path.join(person_dir, expected_xls)):
+                            excel_path = os.path.join(person_dir, expected_xls)
+                        if excel_path:
+                            try:
+                                df = pd.read_excel(excel_path)
+                                possible_code_columns = ['类号', '分类号', '编号', '代码']
+                                possible_name_columns = ['材料名称', '名称', '内容']
+                                possible_date_columns = ['日期', '时间', '形成日期']
+                                possible_page_columns = ['页数', '页码数', '页']
+                                code_col = None
+                                for col in possible_code_columns:
+                                    if col in df.columns:
+                                        code_col = col
+                                        break
+                                name_col = None
+                                for col in possible_name_columns:
+                                    if col in df.columns:
+                                        name_col = col
+                                        break
+                                date_col = None
+                                for col in possible_date_columns:
+                                    if col in df.columns:
+                                        date_col = col
+                                        break
+                                page_col = None
+                                for col in possible_page_columns:
+                                    if col in df.columns:
+                                        page_col = col
+                                        break
+                                if code_col:
+                                    df[code_col] = df[code_col].astype(str)
+                                    matching_rows = df[df[code_col].str.strip() == class_code.strip()]
+                                    if not matching_rows.empty:
+                                        row = matching_rows.iloc[0]
+                                        if name_col and name_col in row.index:
+                                            material_name = str(row[name_col])
+                                        if date_col and date_col in row.index:
+                                            file_date = str(row[date_col])
+                                        if page_col and page_col in row.index:
+                                            page_count = str(row[page_col])
+                                        logging.info(f"从Excel获取到信息: 材料名称={material_name}, 日期={file_date}, 页数={page_count}")
+                            except Exception as e:
+                                logging.error(f"读取Excel文件失败: {str(e)}")
+                        else:
+                            msg = f"缺少对应的excel文件: {expected_xlsx} 或 {expected_xls}"
+                            logging.warning(msg)
+                            messagebox.showwarning("警告", msg)
+            return material_name, file_date, page_count
+        except Exception as e:
+            logging.error(f"获取Excel信息失败: {str(e)}")
+            return "", "", ""
         """从Excel文件中获取材料名称、日期和页数信息"""
         try:
             # 默认值
@@ -840,6 +894,13 @@ class MainWindow:
         self.login_status_var.set("未登录")
         logging.info("用户已退出登录")
         
+        # 清空搜索状态和右侧文件列表
+        self.has_searched = False
+        self.current_search_name = None
+        self.current_search_id = None
+        if hasattr(self, 'file_list'):
+            self.file_list.delete(*self.file_list.get_children())
+
         # 更新菜单和权限
         self.update_menu_by_role(None)
         
@@ -1198,6 +1259,56 @@ class MainWindow:
             messagebox.showerror("错误", f"导入失败：{str(e)}")
 
     def search_person(self):
+        """搜索人员档案（支持分类过滤）"""
+        search_name = self.search_name_var.get().strip()
+        search_id = self.search_id_var.get().strip()
+        try:
+            self.file_list.delete(*self.file_list.get_children())
+            if not search_name and not search_id:
+                self.current_search_name = None
+                self.current_search_id = None
+                self.has_searched = False
+                messagebox.showinfo("提示", "请输入姓名或编号进行搜索")
+                return
+            self.current_search_name = search_name if search_name else None
+            self.current_search_id = search_id if search_id else None
+            self.has_searched = True
+            logging.info(f"执行搜索：姓名='{search_name}', 编号='{search_id}'")
+            # 判断是否有选中分类
+            selected_items = self.tree.selection() if hasattr(self, 'tree') else []
+            if selected_items:
+                self.on_category_selected(None)
+                return
+            # 无分类选中，显示所有检索结果
+            query = '''
+                SELECT DISTINCT file_name, file_path 
+                FROM person_files 
+                WHERE file_name NOT LIKE '~%'
+                AND file_name NOT LIKE '.%'
+                AND file_name LIKE '%.pdf'
+            '''
+            params = []
+            if search_name:
+                query += ' AND person_name = ?'
+                params.append(search_name)
+            if search_id:
+                query += ' AND file_id = ?'
+                params.append(search_id)
+            query += ' ORDER BY file_name'
+            logging.info(f"搜索查询SQL: {query}, 参数: {params}")
+            self.db.cursor.execute(query, params)
+            files = self.db.cursor.fetchall()
+            self.update_file_list(files)
+            if files:
+                logging.info(f"搜索结果: 找到 {len(files)} 个文件")
+                messagebox.showinfo("搜索结果", f"找到 {len(files)} 个匹配文件")
+            else:
+                logging.info("搜索结果: 未找到匹配文件")
+                messagebox.showinfo("搜索结果", "未找到匹配文件")
+        except Exception as e:
+            logging.error(f"搜索失败: {str(e)}", exc_info=True)
+            messagebox.showerror("错误", f"搜索失败：{str(e)}")
+
         """搜索人员档案"""
         search_name = self.search_name_var.get().strip()
         search_id = self.search_id_var.get().strip()
@@ -1308,13 +1419,19 @@ class MainWindow:
         selected_items = self.tree.selection()
         if not selected_items:
             return
-        
+
+        # 未登录时不显示任何内容
+        if not hasattr(self, 'current_user') or self.current_user is None:
+            self.file_list.delete(*self.file_list.get_children())
+            logging.info("未登录状态，点击分类不显示文件")
+            return
+
         # 判断是否进行过搜索，如果没有搜索过则右侧列表为空
         if not hasattr(self, 'has_searched') or not self.has_searched:
             self.file_list.delete(*self.file_list.get_children())
             logging.info("未进行搜索，不显示文件")
             return
-        
+
         selected_item = selected_items[0]
         selected_text = self.tree.item(selected_item)['text']
         parent_item = self.tree.parent(selected_item)
