@@ -26,7 +26,7 @@ from src.ui.main_window import MainWindow
 from src.config.logger import setup_logger
 
 # 应用程序常量
-VERSION = "1.0(0516)"
+VERSION = "1.0(0518)"
 
 def main():
     """程序入口点函数"""

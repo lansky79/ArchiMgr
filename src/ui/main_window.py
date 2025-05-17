@@ -12,6 +12,8 @@ import time
 import json
 import hashlib
 
+from utils.excel_utils import get_excel_info, ExcelFileNotFound
+
 class MainWindow:
     def __init__(self, root, db=None, version="1.0"):
         self.root = root
@@ -95,9 +97,11 @@ class MainWindow:
         self.current_search_id = None  # 添加当前搜索编号的记录
         self.has_searched = False  # 标记是否进行过搜索
         
-        # 初始设置权限（未登录状态）
-        self.update_menu_by_role(None)
-        self.update_tools_permission(False)
+        # 测试用：默认登录为管理员
+        self.current_user = (1, 'admin', '管理员', 'admin')
+        self.login_status_var.set(f"已登录: 管理员")
+        self.update_menu_by_role('admin')
+        self.update_tools_permission(True)
         
         # 根据注册状态更新界面
         self.update_ui_by_registration()
@@ -217,6 +221,10 @@ class MainWindow:
         
         # 创建工具栏
         self.create_toolbar()
+        
+        # 初始化搜索结果状态变量
+        self.search_result_var = tk.StringVar()
+        self.search_result_var.set("就绪")
         
         # 创建主框架
         self.create_main_frame()
@@ -413,49 +421,6 @@ class MainWindow:
         # 绑定双击事件
         self.file_list.bind('<Double-1>', self.on_file_double_click)
 
-    def get_category_info(self, file_code):
-        """根据文件编码获取分类信息"""
-        try:
-            if file_code is None:
-                return ""
-                
-            parts = file_code.split('-')
-            main_num = parts[0]
-            
-            # 先尝试获取二级分类
-            if len(parts) >= 2 and parts[1].isdigit():
-                sub_num = parts[1]
-                # 查询二级分类信息
-                self.db.cursor.execute('''
-                    SELECT c.category, p.category as parent_category
-                    FROM categories c
-                    JOIN categories p ON c.parent_category = p.category
-                    WHERE c.main_category_num = ? 
-                    AND c.sub_category_num = ?
-                ''', (main_num, sub_num))
-                
-                result = self.db.cursor.fetchone()
-                if result:
-                    return f"{result[1]} - {result[0]}"
-            
-            # 如果没有二级分类或找不到，查询主分类名称
-            self.db.cursor.execute('''
-                SELECT category 
-                FROM categories 
-                WHERE main_category_num = ? 
-                AND parent_category IS NULL
-            ''', (main_num,))
-            
-            result = self.db.cursor.fetchone()
-            if result:
-                return result[0]
-            
-            return ""
-            
-        except Exception as e:
-            logging.error(f"获取分类信息失败: {str(e)}", exc_info=True)
-            return ""
-
     def update_file_list(self, files):
         """更新文件列表"""
         # 清空现有列表
@@ -498,7 +463,24 @@ class MainWindow:
                 logging.debug(f"处理文件: {file_name}, 类号: {class_code}, 编号: {file_id}, 人名: {person_name}, 目录名: {dir_name}")
                 
                 # 从Excel获取文件信息（材料名称、日期、页数）
-                material_name, file_date, page_count = self.get_excel_info(dir_name, class_code)
+                try:
+                    # dir_name = 文件夹名（如 123张三），需分解为编号和姓名
+                    match = re.match(r'^(\d+)(.+)$', dir_name)
+                    if match:
+                        file_id = match.group(1)
+                        person_name = match.group(2).strip()
+                    else:
+                        file_id = ''
+                        person_name = dir_name
+                    material_name, file_date, page_count = get_excel_info(self.import_root_dir, person_name, file_id, class_code)
+                except ExcelFileNotFound as e:
+                    logging.warning(str(e))
+                    material_name, file_date, page_count = '', '', ''
+                    messagebox.showwarning("未找到Excel文件", str(e))
+                except Exception as e:
+                    logging.error(f"Excel信息读取失败: {str(e)}")
+                    material_name, file_date, page_count = '', '', ''
+                    messagebox.showerror("Excel读取错误", f"读取Excel信息时发生错误：{str(e)}")
                 
                 # 插入到列表
                 self.file_list.insert('', 'end', values=(
@@ -519,158 +501,6 @@ class MainWindow:
     def hash_password(self, password):
         """对密码进行哈希加密"""
         return hashlib.sha256(password.encode()).hexdigest()
-        
-    def get_excel_info(self, dir_name, class_code):
-        """从Excel文件中获取材料名称、日期和页数信息（严格匹配编号+姓名.xlsx/.xls）"""
-        try:
-            material_name = ""
-            file_date = ""
-            page_count = ""
-            if self.import_root_dir and os.path.exists(self.import_root_dir):
-                person_dir = os.path.join(self.import_root_dir, dir_name)
-                if os.path.exists(person_dir):
-                    match = re.match(r'^(\d+)(.+)$', dir_name)
-                    if match:
-                        file_id = match.group(1)
-                        person_name = match.group(2).strip()
-                        expected_xlsx = f"{file_id}{person_name}.xlsx"
-                        expected_xls = f"{file_id}{person_name}.xls"
-                        excel_path = None
-                        if os.path.exists(os.path.join(person_dir, expected_xlsx)):
-                            excel_path = os.path.join(person_dir, expected_xlsx)
-                        elif os.path.exists(os.path.join(person_dir, expected_xls)):
-                            excel_path = os.path.join(person_dir, expected_xls)
-                        if excel_path:
-                            try:
-                                df = pd.read_excel(excel_path)
-                                possible_code_columns = ['类号', '分类号', '编号', '代码']
-                                possible_name_columns = ['材料名称', '名称', '内容']
-                                possible_date_columns = ['日期', '时间', '形成日期']
-                                possible_page_columns = ['页数', '页码数', '页']
-                                code_col = None
-                                for col in possible_code_columns:
-                                    if col in df.columns:
-                                        code_col = col
-                                        break
-                                name_col = None
-                                for col in possible_name_columns:
-                                    if col in df.columns:
-                                        name_col = col
-                                        break
-                                date_col = None
-                                for col in possible_date_columns:
-                                    if col in df.columns:
-                                        date_col = col
-                                        break
-                                page_col = None
-                                for col in possible_page_columns:
-                                    if col in df.columns:
-                                        page_col = col
-                                        break
-                                if code_col:
-                                    df[code_col] = df[code_col].astype(str)
-                                    matching_rows = df[df[code_col].str.strip() == class_code.strip()]
-                                    if not matching_rows.empty:
-                                        row = matching_rows.iloc[0]
-                                        if name_col and name_col in row.index:
-                                            material_name = str(row[name_col])
-                                        if date_col and date_col in row.index:
-                                            file_date = str(row[date_col])
-                                        if page_col and page_col in row.index:
-                                            page_count = str(row[page_col])
-                                        logging.info(f"从Excel获取到信息: 材料名称={material_name}, 日期={file_date}, 页数={page_count}")
-                            except Exception as e:
-                                logging.error(f"读取Excel文件失败: {str(e)}")
-                        else:
-                            msg = f"缺少对应的excel文件: {expected_xlsx} 或 {expected_xls}"
-                            logging.warning(msg)
-                            messagebox.showwarning("警告", msg)
-            return material_name, file_date, page_count
-        except Exception as e:
-            logging.error(f"获取Excel信息失败: {str(e)}")
-            return "", "", ""
-        """从Excel文件中获取材料名称、日期和页数信息"""
-        try:
-            # 默认值
-            material_name = ""
-            file_date = ""
-            page_count = ""
-            
-            # 查找目录下的Excel文件
-            if self.import_root_dir and os.path.exists(self.import_root_dir):
-                person_dir = os.path.join(self.import_root_dir, dir_name)
-                if os.path.exists(person_dir):
-                    excel_files = [f for f in os.listdir(person_dir) if f.lower().endswith(('.xls', '.xlsx'))]
-                    
-                    if excel_files:
-                        excel_path = os.path.join(person_dir, excel_files[0])
-                        logging.info(f"找到Excel文件: {excel_path}")
-                        
-                        try:
-                            # 读取Excel文件
-                            df = pd.read_excel(excel_path)
-                            
-                            # 查找匹配的类号行
-                            # 尝试不同的列名，因为Excel文件格式可能不同
-                            possible_code_columns = ['类号', '分类号', '编号', '代码']
-                            possible_name_columns = ['材料名称', '名称', '内容']
-                            possible_date_columns = ['日期', '时间', '形成日期']
-                            possible_page_columns = ['页数', '页码数', '页']
-                            
-                            # 查找实际的列名
-                            code_col = None
-                            for col in possible_code_columns:
-                                if col in df.columns:
-                                    code_col = col
-                                    break
-                                    
-                            name_col = None
-                            for col in possible_name_columns:
-                                if col in df.columns:
-                                    name_col = col
-                                    break
-                                    
-                            date_col = None
-                            for col in possible_date_columns:
-                                if col in df.columns:
-                                    date_col = col
-                                    break
-                                    
-                            page_col = None
-                            for col in possible_page_columns:
-                                if col in df.columns:
-                                    page_col = col
-                                    break
-                            
-                            if code_col:
-                                # 转换为字符串进行比较
-                                df[code_col] = df[code_col].astype(str)
-                                
-                                # 查找匹配的行
-                                matching_rows = df[df[code_col].str.strip() == class_code.strip()]
-                                
-                                if not matching_rows.empty:
-                                    # 获取第一个匹配行的信息
-                                    row = matching_rows.iloc[0]
-                                    
-                                    if name_col and name_col in row.index:
-                                        material_name = str(row[name_col])
-                                    
-                                    if date_col and date_col in row.index:
-                                        file_date = str(row[date_col])
-                                    
-                                    if page_col and page_col in row.index:
-                                        page_count = str(row[page_col])
-                                        
-                                    logging.info(f"从Excel获取到信息: 材料名称={material_name}, 日期={file_date}, 页数={page_count}")
-                        except Exception as e:
-                            logging.error(f"读取Excel文件失败: {str(e)}")
-            
-            return material_name, file_date, page_count
-            
-        except Exception as e:
-            logging.error(f"获取Excel信息失败: {str(e)}")
-            return "", "", ""
     
     def register_user(self, username, password, real_name):
         """注册新用户"""
@@ -907,7 +737,36 @@ class MainWindow:
     def show_help(self):
         """显示帮助信息"""
         logging.debug("显示帮助信息")
-        help_text = """档案检索系统使用说明：
+        
+        # 创建帮助窗口
+        help_window = tk.Toplevel(self.root)
+        help_window.title("使用说明 - 档案检索系统 v1.0(0518)")
+        help_window.geometry("800x600")  # 设置更大的窗口大小
+        
+        # 添加滚动条
+        frame = ttk.Frame(help_window)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # 添加滚动条
+        scrollbar = ttk.Scrollbar(frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 添加文本框
+        text = tk.Text(
+            frame, 
+            wrap=tk.WORD, 
+            yscrollcommand=scrollbar.set,
+            font=('Microsoft YaHei', 10),
+            padx=10,
+            pady=10
+        )
+        text.pack(fill=tk.BOTH, expand=True)
+        
+        # 配置滚动条
+        scrollbar.config(command=text.yview)
+        
+        # 设置帮助文本
+        help_text = """档案检索系统使用说明 (v1.0(0518))
 
 1. 系统注册
    * 初次使用请点击"帮助"菜单中的"用户注册"
@@ -922,28 +781,58 @@ class MainWindow:
 
 3. 搜索功能
    * 登录后在右上角输入姓名或编号进行搜索
-   * 搜索时使用精确匹配，请输入完整姓名或编号
+   * 不支持模糊搜索，请确保输入完整的姓名或编号
    * 当有同名档案时，系统会提示输入编号进行精确搜索
-   * 搜索后才能查看左侧分类目录下的文件
-   * 搜索结果会显示材料名称、日期和页数（来自目录中的Excel文件）
+   * 搜索结果会显示材料名称、日期和页数信息
+   * 支持按左侧分类目录筛选搜索结果
 
 4. 文件浏览
    * 左侧为档案分类目录
-   * 右侧显示文件列表
-   * 双击右侧文件可以打开查看
+   * 右侧显示文件列表，包含材料名称、日期和页数
+   * 双击文件可以打开查看
+   * 支持按列排序（点击列标题）
 
 5. 导入功能
    * 导入文件: 导入档案文件（所有登录用户可用）
-   * 每次文件目录或Excel文件发生变化时，需要重新导入
-   * 导入时会读取目录中的Excel文件，获取材料名称、日期和页数信息
+   * 支持批量导入整个目录
+   * 自动识别并导入PDF文件
+   * 自动从Excel文件读取材料信息
+   * 导入时会自动去重，避免重复导入
 
 6. 工具功能
-   * 打开程序安装目录: 打开程序所在的文件夹
-   * 打开档案文件目录: 打开档案文件存放的文件夹
-   * 打开数据库位置: 打开数据库文件所在的文件夹
+   * 打开程序安装目录: 快速访问程序文件
+   * 打开档案文件目录: 直接浏览档案文件
+   * 打开数据库位置: 查看或备份数据库
    * 清理数据库(仅管理员): 清理重复和无效记录
+
+7. 系统要求
+   * 操作系统: Windows 7/10/11
+   * 内存: 4GB 或更高
+   * 存储空间: 至少500MB可用空间
+   * 需要安装Microsoft Office或WPS Office查看文档
 """
-        messagebox.showinfo("使用说明", help_text)
+        # 插入帮助文本
+        text.insert(tk.END, help_text)
+        
+        # 禁用文本编辑
+        text.config(state=tk.DISABLED)
+        
+        # 添加关闭按钮
+        button_frame = ttk.Frame(help_window)
+        button_frame.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Button(button_frame, text="关闭", command=help_window.destroy).pack(side=tk.RIGHT)
+        
+        # 设置窗口居中
+        help_window.update_idletasks()
+        width = help_window.winfo_width()
+        height = help_window.winfo_height()
+        x = (help_window.winfo_screenwidth() // 2) - (width // 2)
+        y = (help_window.winfo_screenheight() // 2) - (height // 2)
+        help_window.geometry(f'{width}x{height}+{x}+{y}')
+        
+        # 设置窗口焦点
+        help_window.focus_set()
+        help_window.grab_set()
         
     def show_about(self):
         """显示关于信息"""
@@ -953,7 +842,55 @@ class MainWindow:
         is_registered = hasattr(self, 'is_registered') and self.is_registered
         registration_info = "已注册：新都区自然资源规划局" if is_registered else "未注册"
         
-        messagebox.showinfo("关于", f"档案检索系统\n\n版本: {self.version}\n{registration_info}")
+        # 创建关于窗口
+        about_window = tk.Toplevel(self.root)
+        about_window.title("关于")
+        about_window.resizable(False, False)
+        
+        # 设置窗口样式
+        style = ttk.Style()
+        
+        # 主框架
+        main_frame = ttk.Frame(about_window, padding=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 标题和版本信息
+        ttk.Label(
+            main_frame, 
+            text=f"档案检索系统\n\n版本: v{self.version}\n{registration_info}",
+            justify=tk.CENTER
+        ).pack(pady=10)
+        
+        # 分隔线
+        ttk.Separator(main_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+        
+        # 按钮框架
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        # 确定按钮
+        btn = ttk.Button(
+            btn_frame, 
+            text="确定", 
+            command=about_window.destroy,
+            width=10
+        )
+        btn.pack(side=tk.TOP, pady=5)
+        
+        # 确保窗口大小合适
+        about_window.update_idletasks()
+        
+        # 设置窗口居中
+        about_window.update_idletasks()
+        width = 300
+        height = 180
+        x = (about_window.winfo_screenwidth() // 2) - (width // 2)
+        y = (about_window.winfo_screenheight() // 2) - (height // 2)
+        about_window.geometry(f'{width}x{height}+{x}+{y}')
+        
+        # 设置窗口焦点
+        about_window.focus_set()
+        about_window.grab_set()
 
     def import_categories(self):
         """导入分类"""
@@ -1260,56 +1197,11 @@ class MainWindow:
 
     def search_person(self):
         """搜索人员档案（支持分类过滤）"""
-        search_name = self.search_name_var.get().strip()
-        search_id = self.search_id_var.get().strip()
-        try:
-            self.file_list.delete(*self.file_list.get_children())
-            if not search_name and not search_id:
-                self.current_search_name = None
-                self.current_search_id = None
-                self.has_searched = False
-                messagebox.showinfo("提示", "请输入姓名或编号进行搜索")
-                return
-            self.current_search_name = search_name if search_name else None
-            self.current_search_id = search_id if search_id else None
-            self.has_searched = True
-            logging.info(f"执行搜索：姓名='{search_name}', 编号='{search_id}'")
-            # 判断是否有选中分类
-            selected_items = self.tree.selection() if hasattr(self, 'tree') else []
-            if selected_items:
-                self.on_category_selected(None)
-                return
-            # 无分类选中，显示所有检索结果
-            query = '''
-                SELECT DISTINCT file_name, file_path 
-                FROM person_files 
-                WHERE file_name NOT LIKE '~%'
-                AND file_name NOT LIKE '.%'
-                AND file_name LIKE '%.pdf'
-            '''
-            params = []
-            if search_name:
-                query += ' AND person_name = ?'
-                params.append(search_name)
-            if search_id:
-                query += ' AND file_id = ?'
-                params.append(search_id)
-            query += ' ORDER BY file_name'
-            logging.info(f"搜索查询SQL: {query}, 参数: {params}")
-            self.db.cursor.execute(query, params)
-            files = self.db.cursor.fetchall()
-            self.update_file_list(files)
-            if files:
-                logging.info(f"搜索结果: 找到 {len(files)} 个文件")
-                messagebox.showinfo("搜索结果", f"找到 {len(files)} 个匹配文件")
-            else:
-                logging.info("搜索结果: 未找到匹配文件")
-                messagebox.showinfo("搜索结果", "未找到匹配文件")
-        except Exception as e:
-            logging.error(f"搜索失败: {str(e)}", exc_info=True)
-            messagebox.showerror("错误", f"搜索失败：{str(e)}")
-
-        """搜索人员档案"""
+        # 取消左侧分类的选择
+        if hasattr(self, 'tree') and self.tree.selection():
+            for item in self.tree.selection():
+                self.tree.selection_remove(item)
+        
         search_name = self.search_name_var.get().strip()
         search_id = self.search_id_var.get().strip()
         
@@ -1322,6 +1214,7 @@ class MainWindow:
                 self.current_search_name = None
                 self.current_search_id = None
                 self.has_searched = False
+                self.search_result_var.set("就绪")
                 messagebox.showinfo("提示", "请输入姓名或编号进行搜索")
                 return
             
@@ -1333,56 +1226,60 @@ class MainWindow:
             self.has_searched = True
             
             logging.info(f"执行搜索：姓名='{search_name}', 编号='{search_id}'")
+            # 直接执行搜索，不检查分类选择
+            # 因为我们已经取消了分类选择，所以这里直接执行搜索逻辑
             
-            # 如果只有姓名没有编号，先检查是否有同名档案
+            # 如果只通过姓名搜索，检查是否有重名人员
             if search_name and not search_id:
-                # 查询完全匹配的同名档案
-                check_query = '''
-                    SELECT COUNT(DISTINCT dir_name) 
+                # 获取所有不同的编号
+                self.db.cursor.execute('''
+                    SELECT DISTINCT file_id 
                     FROM person_files 
                     WHERE person_name = ?
-                '''
-                self.db.cursor.execute(check_query, (search_name,))
-                same_name_count = self.db.cursor.fetchone()[0]
+                    ORDER BY file_id
+                ''', (search_name,))
                 
-                if same_name_count > 1:
-                    # 如果有多个同名档案，提示用户输入编号
-                    messagebox.showinfo("提示", f"发现{same_name_count}个同名档案，请输入编号进行精确搜索")
-                    
-                    # 获取这些同名档案的编号信息并显示
-                    id_query = '''
-                        SELECT DISTINCT dir_name, file_id 
-                        FROM person_files 
-                        WHERE person_name = ?
-                    '''
-                    self.db.cursor.execute(id_query, (search_name,))
-                    id_results = self.db.cursor.fetchall()
-                    
-                    id_info = "同名档案编号信息:\n"
-                    for dir_name, file_id in id_results:
-                        id_info += f"{dir_name}: {file_id}\n"
-                    
-                    messagebox.showinfo("编号信息", id_info)
+                id_list = [str(row[0]) for row in self.db.cursor.fetchall() if row[0]]
+                
+                if len(id_list) > 1:
+                    # 设置重名标志
+                    self.has_duplicate_names = True
+                    # 找到多个不同编号的相同姓名，显示所有编号并提示用户输入
+                    id_text = ", ".join(id_list)
+                    logging.info(f"发现 {len(id_list)} 个同名人员，编号: {id_text}")
+                    self.search_result_var.set(f"发现 {len(id_list)} 个同名人员，请选择编号: {id_text}")
+                    messagebox.showinfo(
+                        "发现重名", 
+                        f"发现 {len(id_list)} 个同名人员，请选择编号后重新搜索：\n\n" +
+                        "\n".join([f"编号: {id}" for id in id_list])
+                    )
+                    # 清空文件列表，等待用户输入编号
+                    self.file_list.delete(*self.file_list.get_children())
                     return
+                else:
+                    # 如果没有重名，清除重名标志
+                    self.has_duplicate_names = False
             
             # 构建查询
             query = '''
                 SELECT DISTINCT file_name, file_path 
                 FROM person_files 
-                WHERE file_name NOT LIKE '~%'
-                AND file_name NOT LIKE '.%'
-                AND file_name LIKE '%.pdf'
+                WHERE 1=1
             '''
             params = []
             
-            # 添加人名过滤条件 - 使用完全匹配而非模糊匹配
+            # 添加文件名过滤条件
+            query += ' AND file_name NOT LIKE ? AND file_name NOT LIKE ? AND file_name LIKE ?'
+            params.extend(['~%', '.%', '%.pdf'])
+            
+            # 添加人名过滤条件 - 使用完全匹配
             if search_name:
-                query += ' AND person_name = ?'  # 使用精确匹配
+                query += ' AND person_name = ?'
                 params.append(search_name)
             
             # 添加编号过滤条件
             if search_id:
-                query += ' AND file_id = ?'  # 使用精确匹配
+                query += ' AND file_id = ?'
                 params.append(search_id)
             
             query += ' ORDER BY file_name'
@@ -1396,16 +1293,24 @@ class MainWindow:
             # 更新文件列表显示
             self.update_file_list(files)
             
+            # 更新状态栏显示搜索结果数量
             if files:
-                logging.info(f"搜索结果: 找到 {len(files)} 个文件")
-                messagebox.showinfo("搜索结果", f"找到 {len(files)} 个匹配文件")
+                result_text = f"找到 {len(files)} 个匹配文件"
+                self.search_result_var.set(result_text)
+                logging.info(f"搜索结果: {result_text}")
+                
+                # 显示搜索结果提示
+                if len(files) > 0:
+                    messagebox.showinfo("搜索结果", result_text)
             else:
+                self.search_result_var.set("未找到匹配文件")
                 logging.info("搜索结果: 未找到匹配文件")
                 messagebox.showinfo("搜索结果", "未找到匹配文件")
-            
+                
         except Exception as e:
             logging.error(f"搜索失败: {str(e)}", exc_info=True)
             messagebox.showerror("错误", f"搜索失败：{str(e)}")
+            self.search_result_var.set("搜索失败")
 
     def extract_category_num(self, filename):
         """从文件名中提取分类号"""
@@ -1475,10 +1380,29 @@ class MainWindow:
                     # 两种模式匹配: 标准格式(4-1-%)和点分格式(4.1.%)
                     params = [f'{category_code}-%', f'{category_code.replace("-", ".")}%']
                     
-                    # 如果有搜索条件，添加人名过滤
-                    if hasattr(self, 'current_search_name') and self.current_search_name:
-                        query += ' AND person_name LIKE ?'
-                        params.append(f'%{self.current_search_name}%')
+                    # 检查是否有搜索条件
+                    if not (hasattr(self, 'current_search_name') and self.current_search_name):
+                        # 清空文件列表
+                        self.file_list.delete(*self.file_list.get_children())
+                        self.search_result_var.set("请先输入姓名进行搜索")
+                        return
+                    
+                    # 检查是否有重名但未输入编号的情况
+                    if hasattr(self, 'has_duplicate_names') and self.has_duplicate_names and \
+                       not (hasattr(self, 'current_search_id') and self.current_search_id):
+                        # 清空文件列表
+                        self.file_list.delete(*self.file_list.get_children())
+                        self.search_result_var.set("发现重名，请输入编号后重试")
+                        return
+                        
+                    # 添加人名过滤条件
+                    query += ' AND person_name = ?'
+                    params.append(self.current_search_name)
+                    
+                    # 如果有编号，添加编号过滤条件
+                    if hasattr(self, 'current_search_id') and self.current_search_id:
+                        query += ' AND file_id = ?'
+                        params.append(self.current_search_id)
                     
                     query += ' ORDER BY file_name'
                     
@@ -1493,6 +1417,10 @@ class MainWindow:
                         logging.debug(f"第一个结果: {files[0]}")
                     
                     self.update_file_list(files)
+                    
+                    # 更新状态栏显示搜索结果数量
+                    self.search_result_var.set(f"搜索结果: {len(files)} 个文件")
+                    
                     logging.info(f"二级分类查询: {category_code}, 找到文件数量: {len(files)}")
                 else:
                     logging.warning(f"未找到分类编码: {category_key}")
@@ -1531,10 +1459,29 @@ class MainWindow:
                         '''
                         params = [f'{category_code}-%', f'{category_code}.%']
                         
-                        # 如果有搜索条件，添加人名过滤
-                        if hasattr(self, 'current_search_name') and self.current_search_name:
-                            query += ' AND person_name LIKE ?'
-                            params.append(f'%{self.current_search_name}%')
+                        # 检查是否有搜索条件
+                        if not (hasattr(self, 'current_search_name') and self.current_search_name):
+                            # 清空文件列表
+                            self.file_list.delete(*self.file_list.get_children())
+                            self.search_result_var.set("请先输入姓名进行搜索")
+                            return
+                        
+                        # 检查是否有重名但未输入编号的情况
+                        if hasattr(self, 'has_duplicate_names') and self.has_duplicate_names and \
+                           not (hasattr(self, 'current_search_id') and self.current_search_id):
+                            # 清空文件列表
+                            self.file_list.delete(*self.file_list.get_children())
+                            self.search_result_var.set("发现重名，请输入编号后重试")
+                            return
+                            
+                        # 添加人名过滤条件
+                        query += ' AND person_name = ?'
+                        params.append(self.current_search_name)
+                        
+                        # 如果有编号，添加编号过滤条件
+                        if hasattr(self, 'current_search_id') and self.current_search_id:
+                            query += ' AND file_id = ?'
+                            params.append(self.current_search_id)
                         
                         query += ' ORDER BY file_name'
                         
@@ -1807,306 +1754,6 @@ class MainWindow:
             # 如果出错，不抛出异常，只记录日志
             pass
             
-    def get_excel_info(self, person_name, class_code):
-        """从Excel获取文件相关信息"""
-        try:
-            # 默认值
-            material_name = ""
-            file_date = ""
-            page_count = ""
-            
-            # 如果没有搜索编号和姓名，则不查询Excel数据
-            if not hasattr(self, 'current_search_name') or not hasattr(self, 'current_search_id') or \
-               (not self.current_search_name and not self.current_search_id):
-                logging.info("未执行搜索或搜索条件为空，跳过Excel数据查询")
-                return material_name, file_date, page_count
-                
-            # 如果没有设置导入目录，无法查找Excel文件
-            if not hasattr(self, 'import_root_dir') or not self.import_root_dir:
-                logging.warning("未设置导入目录，请先导入文件或档案")
-                return material_name, file_date, page_count
-                
-            # 全面诊断日志
-            logging.info(f"====== 开始读取Excel文件信息 ======")
-            logging.info(f"人名: '{person_name}', 类号: '{class_code}'")
-            logging.info(f"搜索条件：姓名='{self.current_search_name}', 编号='{self.current_search_id}'")
-            logging.info(f"从导入目录查找Excel文件: {self.import_root_dir}")
-            
-            # 首先确定对应的sheet
-            # 解析类号 (例如: 4-1-1, 9-2-3)
-            class_parts = class_code.split('-')
-            main_code = class_parts[0]  # 主分类号 (例如 4, 9)
-            
-            # 特殊处理第四类和第九类，它们有二级子类
-            sheet_code = main_code
-            search_class_code = class_code
-            
-            if main_code in ['4', '9'] and len(class_parts) >= 2:
-                # 例如: 4-1-1 -> 使用sheet "四-1"，匹配A列值 "4-1-1"
-                sheet_code = f"{main_code}-{class_parts[1]}"
-                search_class_code = class_code  # 完整类号用于在A列查找
-                logging.info(f"特殊处理类别 {main_code}，使用二级sheet代码: {sheet_code}，查找A列值: {search_class_code}")
-            else:
-                # 例如: 1-1 -> 使用sheet "一"，匹配A列值 "1-1"
-                search_class_code = class_code
-                logging.info(f"标准处理类别 {main_code}，使用sheet代码: {sheet_code}，查找A列值: {search_class_code}")
-            
-            # 转换为对应的sheet名称
-            sheet_map = {
-                '1': '一', '2': '二', '3': '三', 
-                '4-1': '四-1', '4-2': '四-2', '4-3': '四-3', '4-4': '四-4',
-                '5': '五', '6': '六', '7': '七', '8': '八',
-                '9-1': '九-1', '9-2': '九-2', '9-3': '九-3', '9-4': '九-4',
-                '10': '十'
-            }
-            
-            sheet_name = sheet_map.get(sheet_code)
-            if not sheet_name:
-                logging.warning(f"无法找到对应的sheet名称，sheet_code: {sheet_code}")
-                return material_name, file_date, page_count
-                
-            logging.info(f"类号: '{class_code}', 解析为: sheet名称'{sheet_name}', 查找A列值: '{search_class_code}'")
-            
-            # 在导入目录中查找Excel文件
-            excel_file_path = None
-            
-            # 精确查找：根据编号和姓名查找对应的Excel文件
-            person_dir = None
-            
-            # 查找规则：
-            # 1. 先在导入目录和子目录中查找与编号和姓名匹配的Excel文件
-            # 2. 如果没找到，再查找与编号和姓名匹配的目录，并在里面查找Excel文件
-            
-            # 导入目录下查找匹配的Excel文件
-            for root, dirs, files in os.walk(self.import_root_dir):
-                excel_files = [f for f in files if f.endswith('.xlsx') and not f.startswith('~')]
-                if excel_files:
-                    logging.info(f"在目录 {root} 中找到 {len(excel_files)} 个Excel文件")
-                    
-                    # 优先查找匹配编号和姓名的Excel文件
-                    if self.current_search_id and self.current_search_name:
-                        for file in excel_files:
-                            if self.current_search_id in file and self.current_search_name in file:
-                                excel_file_path = os.path.join(root, file)
-                                logging.info(f"找到匹配的Excel文件(编号+姓名): {excel_file_path}")
-                                break
-                    
-                    # 如果未找到，则查找匹配编号的Excel文件
-                    if not excel_file_path and self.current_search_id:
-                        for file in excel_files:
-                            if self.current_search_id in file:
-                                excel_file_path = os.path.join(root, file)
-                                logging.info(f"找到匹配的Excel文件(编号): {excel_file_path}")
-                                break
-                    
-                    # 如果仍未找到，则查找匹配姓名的Excel文件
-                    if not excel_file_path and self.current_search_name:
-                        for file in excel_files:
-                            if self.current_search_name in file:
-                                excel_file_path = os.path.join(root, file)
-                                logging.info(f"找到匹配的Excel文件(姓名): {excel_file_path}")
-                                break
-                
-                # 如果找到了Excel文件，终止搜索
-                if excel_file_path:
-                    break
-                
-                # 查找匹配的目录
-                for dir_name in dirs:
-                    if (self.current_search_id and self.current_search_id in dir_name) or \
-                       (self.current_search_name and self.current_search_name in dir_name):
-                        person_dir = os.path.join(root, dir_name)
-                        logging.info(f"找到匹配的目录: {person_dir}")
-                        break
-                
-                if person_dir:
-                    # 在匹配的目录中查找Excel文件
-                    for subroot, _, subfiles in os.walk(person_dir):
-                        excel_files = [f for f in subfiles if f.endswith('.xlsx') and not f.startswith('~')]
-                        if excel_files:
-                            excel_file_path = os.path.join(subroot, excel_files[0])
-                            logging.info(f"在匹配目录中找到Excel文件: {excel_file_path}")
-                            break
-                    
-                    if excel_file_path:
-                        break
-            
-            # 没有找到任何Excel文件，返回空值
-            if not excel_file_path:
-                logging.warning("在导入目录中未找到匹配的Excel文件")
-                return material_name, file_date, page_count
-            
-            # 使用找到的Excel文件
-            logging.info(f"将使用Excel文件: {excel_file_path}")
-            
-            try:
-                # 读取Excel文件中的所有sheet
-                excel = pd.ExcelFile(excel_file_path)
-                all_sheets = excel.sheet_names
-                logging.info(f"Excel文件包含的sheets: {all_sheets}")
-                
-                # 检查目标sheet是否存在
-                if sheet_name not in all_sheets:
-                    logging.warning(f"未找到sheet '{sheet_name}'，尝试查找相似名称")
-                    # 尝试其他可能的sheet名称，例如带引号或括号的
-                    possible_sheets = [s for s in all_sheets if sheet_name in s]
-                    if possible_sheets:
-                        sheet_name = possible_sheets[0]
-                        logging.info(f"使用相似的sheet名称: {sheet_name}")
-                    else:
-                        logging.error(f"在Excel文件中未找到sheet '{sheet_name}'或相似名称")
-                        return material_name, file_date, page_count
-                
-                # 读取sheet数据
-                df = pd.read_excel(excel_file_path, sheet_name=sheet_name)
-                logging.info(f"成功读取sheet '{sheet_name}', 行数: {len(df)}")
-                
-                # 显示前几行数据用于调试
-                if not df.empty:
-                    preview = df.head().to_string()
-                    logging.info(f"表格前5行数据:\n{preview}")
-                else:
-                    logging.warning(f"表格 '{sheet_name}' 是空的")
-                    return material_name, file_date, page_count
-                
-                # 在A列中查找与类号匹配的行
-                found = False
-                logging.info(f"开始在A列中查找值: '{search_class_code}'")
-                
-                # 输出A列所有值用于调试
-                a_column_values = df.iloc[:, 0].astype(str).tolist()
-                logging.info(f"A列所有值: {a_column_values}")
-                
-                for i, value in enumerate(df.iloc[:, 0]):
-                    # 转换为字符串并去除空格
-                    str_value = str(value).strip()
-                    logging.debug(f"行 {i+1}, A列值: '{str_value}'")
-                    
-                    # 先尝试精确匹配
-                    if str_value == search_class_code:
-                        row = df.iloc[i]
-                        logging.info(f"在第 {i+1} 行找到精确匹配: '{str_value}' == '{search_class_code}'")
-                        
-                        # 获取所有列的值用于调试
-                        row_values = row.to_list()
-                        logging.info(f"匹配行所有列的值: {row_values}")
-                        
-                        # 获取材料名称(B列)
-                        if len(row) > 1:
-                            material_name = str(row.iloc[1]) if pd.notna(row.iloc[1]) else ""
-                            logging.info(f"B列(材料名称): '{material_name}'")
-                        else:
-                            logging.warning("行数据不足，无法读取B列")
-                        
-                        # 获取日期(C,D,E列)，拼接为YYYY-MM-DD格式
-                        try:
-                            if len(row) > 4:
-                                year = str(int(row.iloc[2])) if pd.notna(row.iloc[2]) else ""
-                                month = str(int(row.iloc[3])) if pd.notna(row.iloc[3]) else ""
-                                day = str(int(row.iloc[4])) if pd.notna(row.iloc[4]) else ""
-                                
-                                logging.info(f"C列(年): '{row.iloc[2]}' -> '{year}'")
-                                logging.info(f"D列(月): '{row.iloc[3]}' -> '{month}'")
-                                logging.info(f"E列(日): '{row.iloc[4]}' -> '{day}'")
-                                
-                                if year and month and day:
-                                    file_date = f"{year}-{month}-{day}"
-                                    logging.info(f"拼接日期: '{file_date}'")
-                                else:
-                                    logging.warning("日期数据不完整")
-                            else:
-                                logging.warning("行数据不足，无法读取完整日期列")
-                        except (ValueError, TypeError) as e:
-                            logging.error(f"日期转换错误: {e}")
-                        
-                        # 获取页数(F列)
-                        try:
-                            if len(row) > 5:
-                                page_value = row.iloc[5]
-                                logging.info(f"F列(页数)原始值: '{page_value}'")
-                                page_count = str(int(page_value)) if pd.notna(page_value) else ""
-                                logging.info(f"处理后页数: '{page_count}'")
-                            else:
-                                logging.warning("行数据不足，无法读取F列")
-                        except (ValueError, TypeError) as e:
-                            logging.error(f"页数转换错误: {e}")
-                        
-                        logging.info(f"最终结果 - 材料名称: '{material_name}', 日期: '{file_date}', 页数: '{page_count}'")
-                        found = True
-                        break
-                
-                if not found:
-                    logging.warning(f"未找到精确匹配，尝试模糊匹配: {search_class_code}")
-                    # 尝试模糊匹配，处理可能的格式不同问题
-                    for i, value in enumerate(df.iloc[:, 0]):
-                        str_value = str(value).strip()
-                        # 移除所有非数字和短横线
-                        clean_value = ''.join(c for c in str_value if c.isdigit() or c == '-')
-                        clean_code = ''.join(c for c in search_class_code if c.isdigit() or c == '-')
-                        
-                        logging.debug(f"行 {i+1}，清理后A列值: '{clean_value}'，清理后搜索值: '{clean_code}'")
-                        
-                        if clean_value == clean_code:
-                            row = df.iloc[i]
-                            logging.info(f"在第 {i+1} 行找到模糊匹配: '{clean_value}' == '{clean_code}'")
-                            
-                            # 获取所有列的值用于调试
-                            row_values = row.to_list()
-                            logging.info(f"匹配行所有列的值: {row_values}")
-                            
-                            # 获取材料名称(B列)
-                            if len(row) > 1:
-                                material_name = str(row.iloc[1]) if pd.notna(row.iloc[1]) else ""
-                                logging.info(f"B列(材料名称): '{material_name}'")
-                            
-                            # 获取日期(C,D,E列)
-                            try:
-                                if len(row) > 4:
-                                    year = str(int(row.iloc[2])) if pd.notna(row.iloc[2]) else ""
-                                    month = str(int(row.iloc[3])) if pd.notna(row.iloc[3]) else ""
-                                    day = str(int(row.iloc[4])) if pd.notna(row.iloc[4]) else ""
-                                    
-                                    logging.info(f"C列(年): '{row.iloc[2]}' -> '{year}'")
-                                    logging.info(f"D列(月): '{row.iloc[3]}' -> '{month}'")
-                                    logging.info(f"E列(日): '{row.iloc[4]}' -> '{day}'")
-                                    
-                                    if year and month and day:
-                                        file_date = f"{year}-{month}-{day}"
-                                        logging.info(f"拼接日期: '{file_date}'")
-                                else:
-                                    logging.warning("行数据不足，无法读取完整日期列")
-                            except (ValueError, TypeError) as e:
-                                logging.error(f"日期转换错误: {e}")
-                            
-                            # 获取页数(F列)
-                            try:
-                                if len(row) > 5:
-                                    page_value = row.iloc[5]
-                                    logging.info(f"F列(页数)原始值: '{page_value}'")
-                                    page_count = str(int(page_value)) if pd.notna(page_value) else ""
-                                    logging.info(f"处理后页数: '{page_count}'")
-                                else:
-                                    logging.warning("行数据不足，无法读取F列")
-                            except (ValueError, TypeError) as e:
-                                logging.error(f"页数转换错误: {e}")
-                            
-                            logging.info(f"模糊匹配结果 - 材料名称: '{material_name}', 日期: '{file_date}', 页数: '{page_count}'")
-                            found = True
-                            break
-                
-                if not found:
-                    logging.error(f"在Sheet '{sheet_name}' 中未找到与值 '{search_class_code}' 匹配的行")
-            
-            except Exception as e:
-                logging.error(f"处理Excel文件 {excel_file_path} 失败: {str(e)}", exc_info=True)
-            
-            logging.info(f"====== 结束读取Excel文件信息 ======")
-            return material_name, file_date, page_count
-            
-        except Exception as e:
-            logging.error(f"获取Excel信息失败: {str(e)}", exc_info=True)
-            return "", "", ""
-
     def load_settings(self):
         """加载用户设置"""
         if os.path.exists(self.settings_file):
@@ -2457,24 +2104,50 @@ class MainWindow:
         reg_dialog.wait_window()
 
     def create_status_bar(self):
-        """创建底部状态栏"""
+        """创建状态栏"""
         # 创建状态栏框架
-        self.status_bar = ttk.Frame(self.root, relief=tk.SUNKEN, padding=(1, 1))
-        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        status_frame = ttk.Frame(self.root)
+        status_frame.pack(side=tk.BOTTOM, fill=tk.X)
         
-        # 创建状态标签
+        # 第一栏：注册状态和用户单位
         self.status_var = tk.StringVar()
         if hasattr(self, 'is_registered') and self.is_registered:
             self.status_var.set("已注册：新都区自然资源规划局")
         else:
             self.status_var.set("未注册")
             
-        status_label = ttk.Label(self.status_bar, textvariable=self.status_var)
-        status_label.pack(side=tk.LEFT, padx=5, pady=2)
+        status_label1 = ttk.Label(
+            status_frame, 
+            textvariable=self.status_var, 
+            relief=tk.SUNKEN, 
+            anchor=tk.W,
+            padding=(5, 2, 5, 2),
+            width=30
+        )
+        status_label1.pack(side=tk.LEFT, fill=tk.X, padx=(0, 1))
         
-        # 分隔符
-        ttk.Separator(self.status_bar, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
+        # 第二栏：版本信息
+        version_text = f"版本: {self.version}"
+        status_label2 = ttk.Label(
+            status_frame, 
+            text=version_text,
+            relief=tk.SUNKEN, 
+            anchor=tk.W,
+            padding=(5, 2, 5, 2),
+            width=15
+        )
+        status_label2.pack(side=tk.LEFT, fill=tk.X, padx=(0, 1))
         
-        # 版本信息
-        version_label = ttk.Label(self.status_bar, text=f"版本: {self.version}")
-        version_label.pack(side=tk.LEFT, padx=5)
+        # 第三栏：搜索结果/状态信息
+        if not hasattr(self, 'search_result_var'):
+            self.search_result_var = tk.StringVar()
+            self.search_result_var.set("就绪")
+            
+        status_label3 = ttk.Label(
+            status_frame, 
+            textvariable=self.search_result_var,
+            relief=tk.SUNKEN, 
+            anchor=tk.W,
+            padding=(5, 2, 5, 2)
+        )
+        status_label3.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
