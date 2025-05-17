@@ -6,6 +6,30 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.spec
+*.exe
+*.dll
+*.pyd
+*.so
+*.dylib
+*.app
+*.dmg
+*.pkg
+*.msi
+*.msm
+*.msp
+*.msix
+*.msixbundle
+*.appx
+*.appxbundle
+*.zip
+*.tar.gz
+*.egg
+*.whl
+*.pyz
+*.pyz.??.??.??
+*.pyz.??.??
+*.pyz.??
+*.pyz
 
 # Logs
 logs/
@@ -40,15 +64,39 @@ Thumbs.db
 database/
 archives/
 
-# Executable files
+# Executable files and installers
 *.exe
 *.dll
 tools/upx/
 *.enc
-
-# Installer files
+installer/
+output/
+release/
 *.msi
 *.msix
+*.msm
+*.msp
+*.app
+*.dmg
+*.pkg
+*.appx
+*.appxbundle
+*.msixbundle
+
+# Installer and distribution files
+*.msi
+*.msix
+*.msm
+*.msp
+*.app
+*.dmg
+*.pkg
+*.appx
+*.appxbundle
+*.msixbundle
+*.zip
+*.tar.gz
+*.whl
 *.msm
 *.msp
 *.exe.manifest
