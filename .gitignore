@@ -103,4 +103,5 @@ release/
 *.pyd
 
 # Inno Setup files
-*.iss
+*.iss/tools/upx/
+remove_large_files.sh
