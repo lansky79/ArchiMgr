@@ -72,6 +72,15 @@ def get_resources_path():
     """获取资源文件路径，这些是只读的，保留在安装目录"""
     if getattr(sys, 'frozen', False):
         # 打包后的环境
+        # 首先检查应用程序目录下的resources
+        app_resources = os.path.join(get_application_path(), 'resources')
+        if os.path.exists(app_resources):
+            return app_resources
+        # 然后检查应用程序目录/src/resources
+        src_resources = os.path.join(get_application_path(), 'src', 'resources')
+        if os.path.exists(src_resources):
+            return src_resources
+        # 如果都找不到，返回默认路径
         return os.path.join(get_application_path(), 'resources')
     else:
         # 开发环境
@@ -79,6 +88,18 @@ def get_resources_path():
 
 def get_icon_path():
     """获取应用图标路径"""
+    # 尝试不同的可能位置
+    possible_paths = [
+        os.path.join(get_resources_path(), 'app.ico'),
+        os.path.join(get_application_path(), 'resources', 'app.ico'),
+        os.path.join(get_application_path(), 'src', 'resources', 'app.ico')
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
+    
+    # 如果都找不到，返回默认路径
     return os.path.join(get_resources_path(), 'app.ico')
 
 def get_exports_dir():

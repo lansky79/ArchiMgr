@@ -3,7 +3,7 @@ import hashlib
 import os
 from tkinter import messagebox
 
-from utils.pinyin_util import get_pinyin  # 导入拼音工具，用于用户名验证
+from src.utils.pinyin_util import get_pinyin  # 导入拼音工具，用于用户名验证
 
 class UserManager:
     """用户管理类，包含所有用户管理相关的功能"""

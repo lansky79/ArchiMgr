@@ -16,6 +16,15 @@ def main():
         "--noconsole",
         "--add-data=resources;resources",
         "--add-data=config;config",
+        "--hidden-import=utils",
+        "--hidden-import=utils.paths",
+        "--hidden-import=utils.excel_utils",
+        "--hidden-import=models",
+        "--hidden-import=models.database",
+        "--hidden-import=ui",
+        "--hidden-import=ui.main_window",
+        "--hidden-import=config",
+        "--hidden-import=config.logger",
         "--clean",
         "src/main.py"
     ]

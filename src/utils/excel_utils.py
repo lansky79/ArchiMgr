@@ -1,6 +1,21 @@
 import os
 import logging
-import pandas as pd
+import sys
+
+# 确保 openpyxl 可用
+try:
+    import openpyxl
+except ImportError:
+    print("警告: 未找到 openpyxl 模块，Excel 功能可能无法正常工作")
+    logging.warning("未找到 openpyxl 模块，Excel 功能可能无法正常工作")
+
+# 导入 pandas
+try:
+    import pandas as pd
+    # 不要全局设置引擎，而是在每次调用时指定
+except ImportError as e:
+    print(f"警告: {str(e)}")
+    logging.warning(f"导入 pandas 失败: {str(e)}")
 
 class ExcelFileNotFound(Exception):
     pass
@@ -107,17 +122,23 @@ def get_excel_info(import_root_dir, person_name, person_id, class_code):
     if not excel_file_path:
         raise ExcelFileNotFound(f"未找到匹配的Excel文件: {person_name}")
 
-    # 读取sheet
-    excel = pd.ExcelFile(excel_file_path)
-    if sheet_name not in excel.sheet_names:
-        # 尝试模糊sheet名
-        candidates = [s for s in excel.sheet_names if sheet_name in s]
-        if candidates:
-            sheet_name = candidates[0]
-        else:
+    # 读取sheet，明确指定 engine='openpyxl'
+    try:
+        excel = pd.ExcelFile(excel_file_path, engine='openpyxl')
+        if sheet_name not in excel.sheet_names:
+            # 尝试模糊sheet名
+            candidates = [s for s in excel.sheet_names if sheet_name in s]
+            if candidates:
+                sheet_name = candidates[0]
+                logging.info(f"使用模糊匹配的sheet名: {sheet_name}")
+            else:
+                return material_name, file_date, page_count
+                
+        df = pd.read_excel(excel_file_path, sheet_name=sheet_name, engine='openpyxl')
+        if df.empty:
             return material_name, file_date, page_count
-    df = pd.read_excel(excel_file_path, sheet_name=sheet_name)
-    if df.empty:
+    except Exception as e:
+        logging.error(f"读取Excel文件失败: {str(e)}")
         return material_name, file_date, page_count
     # 精确查找A列
     found = False

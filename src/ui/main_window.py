@@ -12,7 +12,18 @@ import time
 import json
 import hashlib
 
-from utils.excel_utils import get_excel_info, ExcelFileNotFound
+# 使用兼容性导入
+try:
+    # 打包环境下的导入方式
+    if getattr(sys, 'frozen', False):
+        from utils.excel_utils import get_excel_info, ExcelFileNotFound
+    else:
+        # 开发环境下的导入方式
+        from src.utils.excel_utils import get_excel_info, ExcelFileNotFound
+except ImportError as e:
+    import logging
+    logging.error(f"导入excel_utils模块失败: {e}")
+    # 不直接退出，让程序继续运行并在需要时报错
 
 class MainWindow:
     def __init__(self, root, db=None, version="1.0"):
@@ -97,11 +108,11 @@ class MainWindow:
         self.current_search_id = None  # 添加当前搜索编号的记录
         self.has_searched = False  # 标记是否进行过搜索
         
-        # 测试用：默认登录为管理员
-        self.current_user = (1, 'admin', '管理员', 'admin')
-        self.login_status_var.set(f"已登录: 管理员")
-        self.update_menu_by_role('admin')
-        self.update_tools_permission(True)
+        # 初始状态为未登录
+        self.current_user = None
+        self.login_status_var.set("未登录")
+        self.update_menu_by_role(None)
+        self.update_tools_permission(False)
         
         # 根据注册状态更新界面
         self.update_ui_by_registration()

@@ -6,7 +6,7 @@ import subprocess
 from tkinter import filedialog, messagebox
 import pandas as pd
 
-from utils.excel_utils import get_excel_info, ExcelFileNotFound
+from src.utils.excel_utils import get_excel_info, ExcelFileNotFound
 
 class FileOperationManager:
     """文件操作管理类，包含所有文件操作相关的功能"""
