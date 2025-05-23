@@ -33,6 +33,10 @@ class FileOperationManager:
         self.main_window.import_root_dir = import_dir
         self.import_root_dir = import_dir
         
+        # 更新主窗口标题
+        if hasattr(self.main_window, 'update_window_title'):
+            self.main_window.update_window_title()
+            
         # 保存设置
         self.main_window.save_settings()
         
@@ -70,6 +74,10 @@ class FileOperationManager:
         self.main_window.import_root_dir = import_dir
         self.import_root_dir = import_dir
         
+        # 更新主窗口标题
+        if hasattr(self.main_window, 'update_window_title'):
+            self.main_window.update_window_title()
+            
         # 保存设置
         self.main_window.save_settings()
         
@@ -118,6 +126,10 @@ class FileOperationManager:
             # 筛选只显示PDF文件
             pdf_files = []
             for file_name, file_path in files:
+                # 确保文件路径在'目录'子目录下
+                if '目录' not in file_path.replace('\\', '/'):
+                    continue
+                    
                 # 将文件名转为小写进行判断
                 if file_name.lower().endswith('.pdf'):
                     pdf_files.append((file_name, file_path))
@@ -127,7 +139,7 @@ class FileOperationManager:
             # 插入新的文件记录
             for file_name, file_path in pdf_files:
                 # 从文件路径中提取人名和文件夹名
-                dir_name = os.path.basename(os.path.dirname(file_path))
+                dir_name = os.path.basename(os.path.dirname(os.path.dirname(file_path)))
                 
                 # 提取编号 - 获取文件夹名中的数字前缀
                 # 正则表达式提取开头的连续数字
@@ -155,7 +167,10 @@ class FileOperationManager:
                     else:
                         file_id = ''
                         person_name = dir_name
-                    material_name, file_date, page_count = get_excel_info(self.import_root_dir, person_name, file_id, class_code)
+                    material_name, file_date, page_count, data_list = get_excel_info(self.import_root_dir, person_name, file_id, class_code)
+                    # 处理 data_list
+                    if data_list:
+                        logging.debug(f"处理文件: {file_name}, 类号: {class_code}, 编号: {file_id}, 人名: {person_name}, 目录名: {dir_name}, 数据列表: {data_list}")
                 except ExcelFileNotFound as e:
                     logging.warning(str(e))
                     material_name, file_date, page_count = '', '', ''
@@ -206,13 +221,12 @@ class FileOperationManager:
             messagebox.showerror("错误", f"打开文件失败: {str(e)}")
     
     def search_person(self):
-        """搜索人员档案（支持分类过滤）
+        """搜索人员档案
         
         搜索规则：
-        1. 如果只输入姓名，搜索所有匹配的姓名
-        2. 如果只输入编号，搜索所有匹配的编号
-        3. 如果同时输入姓名和编号，进行精确匹配
-        4. 如果姓名匹配到多条记录，要求用户输入编号进行精确匹配
+        1. 只在'目录'子目录下搜索Excel文件
+        2. 文件名必须完全匹配"编号+姓名.xlsx"
+        3. 如果未找到匹配文件，只显示一次提示
         """
         # 检查是否已登录
         if not self.main_window.current_user:
@@ -240,7 +254,11 @@ class FileOperationManager:
         
         # 如果没有设置导入目录，提示用户
         if not self.main_window.import_root_dir:
-            messagebox.showwarning("警告", "请先导入文件或档案")
+            error_msg = "请先使用'导入档案'功能导入档案文件"
+            logging.warning(error_msg)
+            if hasattr(self.main_window, 'status_bar'):
+                self.main_window.status_bar.show_message(error_msg, "warning")
+            messagebox.showinfo("提示", error_msg)
             return
             
         # 如果搜索条件为空，提示用户
@@ -253,225 +271,86 @@ class FileOperationManager:
         # 清空当前列表
         self.main_window.file_list.delete(*self.main_window.file_list.get_children())
 
-        # 在导入目录中搜索
+        # 构建'目录'子目录路径
         import_root_dir = self.main_window.import_root_dir
-        if not import_root_dir or not os.path.exists(import_root_dir):
-            error_msg = f"导入目录不存在: {import_root_dir}"
+        catalog_dir = os.path.join(import_root_dir, '目录')
+        
+        # 确保'目录'文件夹存在
+        if not os.path.exists(catalog_dir):
+            error_msg = f"目录不存在: {catalog_dir}"
             logging.error(error_msg)
-            messagebox.showerror("错误", "请先设置有效的导入目录")
-            self.main_window.status_bar.show_message("错误: 请先设置导入目录", "error")
+            messagebox.showerror("错误", "未找到'目录'文件夹，请确保文件结构正确")
+            if hasattr(self.main_window, 'status_bar'):
+                self.main_window.status_bar.show_message("错误: 未找到'目录'文件夹", "error")
             return
 
-        logging.info(f"在目录中搜索: {import_root_dir}")
+        logging.info(f"在目录中搜索: {catalog_dir}")
         
-        # 获取所有Excel文件
-        all_excel_files = []
+        # 构建预期的Excel文件名
+        expected_name = f"{search_id}{search_name}"
+        expected_filename = f"{expected_name}.xlsx"
+        expected_path = os.path.join(catalog_dir, expected_filename)
+        
+        # 检查文件是否存在
+        if not os.path.exists(expected_path):
+            error_msg = f"未找到匹配的Excel文件: {expected_filename}"
+            logging.warning(error_msg)
+            if hasattr(self.main_window, 'status_bar'):
+                self.main_window.status_bar.show_message(error_msg, "warning")
+            messagebox.showinfo("提示", error_msg)
+            return
+            
+        # 如果找到了匹配的文件，显示文件信息
+        logging.info(f"找到匹配的Excel文件: {expected_path}")
+        
+        # 获取Excel文件中的所有工作表信息
         try:
-            for root, dirs, files in os.walk(import_root_dir):
-                all_excel_files.extend(
-                    os.path.join(root, f) for f in files 
-                    if f.lower().endswith('.xlsx') and not f.startswith('~')
-                )
-            logging.info(f"找到 {len(all_excel_files)} 个Excel文件")
-        except Exception as e:
-            error_msg = f"遍历目录时出错: {str(e)}"
-            logging.error(error_msg)
-            messagebox.showerror("错误", error_msg)
-            self.main_window.status_bar.show_message("搜索出错", "error")
-            return
-
-        # 搜索匹配的文件
-        matched_files = []
-        search_name_lower = search_name.lower() if search_name else ""
-        search_id_lower = search_id.lower() if search_id else ""
-        
-        # 获取所有Excel文件的基本信息
-        excel_files = []
-        for file_path in all_excel_files:
-            try:
-                file_name = os.path.basename(file_path)
-                file_name_without_ext = os.path.splitext(file_name)[0]
-                excel_files.append({
-                    'path': file_path,
-                    'name': file_name,
-                    'name_without_ext': file_name_without_ext,
-                    'name_lower': file_name_without_ext.lower()
-                })
-            except Exception as e:
-                logging.error(f"处理文件 {file_path} 时出错: {e}")
-        
-        # 1. 如果同时提供了编号和姓名
-        if search_id and search_name:
-            # 构建预期的文件名（不包含扩展名）
-            expected_name = f"{search_id}{search_name}"
-            expected_name_lower = expected_name.lower()
+            # 使用pandas读取Excel文件
+            excel_file = pd.ExcelFile(expected_path, engine='openpyxl')
+            sheet_names = excel_file.sheet_names
             
-            # 检查是否有完全匹配的记录
-            for file_info in excel_files:
-                # 检查文件名是否完全匹配（不区分大小写）
-                if file_info['name_lower'] == expected_name_lower:
-                    matched_files = [file_info['path']]  # 清空之前的匹配，只保留完全匹配
-                    logging.info(f"完全匹配: {file_info['path']}")
-                    break
-            else:
-                # 如果没有完全匹配的记录，显示警告
-                error_msg = f"未找到完全匹配的记录: {search_id}{search_name}.xlsx"
-                logging.warning(error_msg)
-                if hasattr(self.main_window, 'status_bar'):
-                    self.main_window.status_bar.show_message(error_msg, "warning")
-                return
-                
-        # 2. 如果只提供了编号
-        elif search_id:
-            for file_info in excel_files:
-                # 检查文件名是否完全匹配编号（不区分大小写）
-                if file_info['name_lower'] == search_id_lower:
-                    matched_files = [file_info['path']]  # 清空之前的匹配，只保留完全匹配
-                    logging.info(f"编号完全匹配: {file_info['path']}")
-                    break
-            else:
-                # 如果没有完全匹配的记录，显示警告
-                error_msg = f"未找到编号为 '{search_id}' 的记录"
-                logging.warning(error_msg)
-                if hasattr(self.main_window, 'status_bar'):
-                    self.main_window.status_bar.show_message(error_msg, "warning")
-                return
-                
-        # 3. 如果只提供了姓名
-        elif search_name:
-            logging.info(f"开始姓名搜索: {search_name}")
-            # 获取当前选中的分类
-            selected_category = None
-            if hasattr(self.main_window, 'category_tree'):
-                selection = self.main_window.category_tree.selection()
-                if selection:
-                    selected_category = self.main_window.category_tree.item(selection[0])['text']
-            
-            # 搜索匹配的文件
-            matched_files = []
-            for file_path in all_excel_files:
-                file_name = os.path.splitext(os.path.basename(file_path))[0].lower()
-                if search_name_lower in file_name:
-                    # 如果选择了分类，检查文件是否在选中的分类目录下
-                    if selected_category:
-                        file_dir = os.path.dirname(file_path)
-                        parent_dir = os.path.dirname(file_dir)
-                        if os.path.basename(parent_dir) == selected_category:
-                            matched_files.append(file_path)
-                    else:
-                        matched_files.append(file_path)
-            
-            logging.info(f"找到 {len(matched_files)} 个姓名匹配项")
-        
-        # 检查文件对应关系
-        logging.info(f"最终匹配文件列表: {matched_files}")
-        if matched_files:
-            # 获取所有匹配的文件名（不包含扩展名）
-            excel_names = [os.path.splitext(os.path.basename(f))[0] for f in matched_files]
-            
-            # 检查是否需要完全匹配
-            if search_id and search_name:
-                expected_name = f"{search_id}{search_name}"
-                exact_matches = [file_path for name, file_path in zip(excel_names, matched_files) 
-                               if name == expected_name]
-                
-                if not exact_matches:
-                    error_msg = f"未找到完全匹配的文件: {expected_name}.xlsx"
-                    logging.warning(error_msg)
-                    if hasattr(self.main_window, 'status_bar'):
-                        self.main_window.status_bar.show_message(error_msg, "warning")
-                    return
+            # 处理每个工作表
+            for sheet_name in sheet_names:
+                try:
+                    # 读取工作表数据
+                    df = pd.read_excel(excel_file, sheet_name=sheet_name, engine='openpyxl', header=0)
                     
-                # 只保留完全匹配的文件
-                matched_files = exact_matches
+                    # 将数据添加到文件列表
+                    for _, row in df.iterrows():
+                        # 获取材料名称、日期和页数
+                        material_name = str(row.get('材料名称', '')) if pd.notna(row.get('材料名称')) else ''
+                        file_date = str(row.get('日期', '')) if pd.notna(row.get('日期')) else ''
+                        page_count = str(int(row.get('页数', ''))) if pd.notna(row.get('页数')) else ''
+                        
+                        # 插入到列表
+                        self.main_window.file_list.insert('', 'end', values=(
+                            search_id,
+                            search_name,
+                            sheet_name,  # 使用工作表名作为类号
+                            material_name,
+                            expected_filename,  # 显示Excel文件名
+                            file_date,
+                            page_count,
+                            expected_path  # 文件路径
+                        ))
+                        
+                except Exception as e:
+                    logging.error(f"处理工作表 {sheet_name} 时出错: {str(e)}")
+                    continue
+                    
+        except Exception as e:
+            error_msg = f"读取Excel文件时出错: {str(e)}"
+            logging.error(error_msg, exc_info=True)
+            messagebox.showerror("错误", error_msg)
+            return
             
-            # 更新文件列表
-            if matched_files:
-                self.main_window.file_list.delete(*self.main_window.file_list.get_children())
-                for file_path in matched_files:
-                    file_name = os.path.basename(file_path)
-                    self.main_window.file_list.insert('', 'end', values=(file_name, file_path))
-                
-                # 更新状态栏（只在最后更新一次）
-                if hasattr(self.main_window, 'status_var'):
-                    self.main_window.status_var.set(f"找到 {len(matched_files)} 个匹配的文件")
-                
-                # 如果是通过姓名搜索且有匹配结果，直接返回
-                if search_name and not search_id:
-                    return
-            
-            # 检查PDF图片文件夹
-            if not matched_files:  # 如果没有匹配的文件，直接返回
-                logging.warning("没有找到匹配的文件")
-                if hasattr(self.main_window, 'status_var'):
-                    self.main_window.status_var.set("没有找到匹配的文件")
-                return
-                
-            excel_file = matched_files[0]  # 取第一个匹配的文件
-            excel_name = os.path.basename(excel_file)
-            excel_name_without_ext = os.path.splitext(excel_name)[0]
-            
-            # 获取Excel文件所在目录的父目录（假设结构为：.../目录/xxx.xlsx）
-            excel_dir = os.path.dirname(excel_file)
-            parent_dir = os.path.dirname(excel_dir)
-            
-            # 构建预期的PDF图片文件夹路径
-            expected_pdf_dir = os.path.join(parent_dir, "pdf图片", excel_name_without_ext)
-            
-            # 检查PDF图片文件夹是否存在
-            if not os.path.exists(expected_pdf_dir):
-                error_msg = f"未找到与Excel文件匹配的PDF图片文件夹: {excel_name_without_ext}"
-                logging.warning(error_msg)
-                if hasattr(self.main_window, 'status_bar'):
-                    self.main_window.status_bar.show_message(error_msg, "warning")
-                return
-                
-            # 检查PDF图片文件夹是否为空
-            try:
-                pdf_files = [f for f in os.listdir(expected_pdf_dir) 
-                           if f.lower().endswith(('.pdf', '.jpg', '.jpeg', '.png'))]
-                if not pdf_files:
-                    error_msg = f"PDF图片文件夹为空: {excel_name_without_ext}"
-                    logging.warning(error_msg)
-                    if hasattr(self.main_window, 'status_bar'):
-                        self.main_window.status_bar.show_message(error_msg, "warning")
-                    return
-                logging.info(f"找到 {len(pdf_files)} 个PDF/图片文件在 {expected_pdf_dir}")
-            except Exception as e:
-                error_msg = f"访问PDF图片文件夹时出错: {str(e)}"
-                logging.error(error_msg)
-                if hasattr(self.main_window, 'status_bar'):
-                    self.main_window.status_bar.show_message(error_msg, "error")
-                return
-        
-        # 去重
-        matched_files = list(dict.fromkeys(matched_files))
-        
-        # 更新文件列表
-        if matched_files:
-            for file_path in matched_files:
-                self.main_window.file_list.insert("", "end", values=(file_path,))
-            
-            msg = f"找到 {len(matched_files)} 个匹配的文件"
-            logging.info(msg)
-            self.main_window.status_bar.show_message(msg, "info")
-        else:
-            msg = f"未找到匹配的文件 (编号: '{search_id}', 姓名: '{search_name}')"
-            logging.warning(msg)
-            self.main_window.status_bar.show_message(msg, "warning")
-        # 更新文件列表
-        if matched_files:
-            # 更新状态栏显示搜索结果数量
-            if hasattr(self.main_window, 'search_result_var'):
-                self.main_window.search_result_var.set(f"搜索结果: {len(matched_files)} 个文件")
-            
-            # 显示搜索结果
-            logging.info(f"搜索完成，共找到 {len(matched_files)} 个匹配的文件")
-        else:
-            # 如果没有找到匹配的文件，清空结果
-            if hasattr(self.main_window, 'search_result_var'):
-                self.main_window.search_result_var.set("未找到匹配的文件")
-            logging.info("搜索完成，未找到匹配的文件")
+        # 更新状态栏
+        if hasattr(self.main_window, 'status_bar'):
+            item_count = len(self.main_window.file_list.get_children())
+            if item_count > 0:
+                self.main_window.status_bar.show_message(f"找到 {item_count} 条记录", "info")
+            else:
+                self.main_window.status_bar.show_message("未找到匹配的记录", "warning")
     
     def extract_category_num(self, filename):
         """从文件名中提取分类号"""
@@ -491,9 +370,24 @@ class FileOperationManager:
     
     def open_archive_directory(self):
         """打开档案文件目录"""
-        if not self.main_window.import_root_dir:
-            messagebox.showwarning("警告", "请先导入文件或档案")
-            return
+        # 如果没有设置导入目录，则使用默认目录
+        if not self.main_window.import_root_dir or not os.path.exists(self.main_window.import_root_dir):
+            # 使用用户主目录作为默认目录
+            default_dir = os.path.expanduser('~')
+            # 让用户选择目录
+            selected_dir = filedialog.askdirectory(
+                title="选择档案文件目录",
+                initialdir=default_dir
+            )
+            if not selected_dir:  # 用户取消了选择
+                return
+            # 更新导入目录
+            self.main_window.import_root_dir = selected_dir
+            self.import_root_dir = selected_dir
+            # 保存设置
+            self.main_window.save_settings()
+        
+        # 打开目录
         self._open_directory(self.main_window.import_root_dir)
     
     def open_database_location(self):

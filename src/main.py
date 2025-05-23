@@ -61,7 +61,70 @@ except Exception as e:
     logging.error(f"预加载模块失败: {str(e)}")
 
 # 应用程序常量
-VERSION = "1.0(0518)"
+VERSION = "1.0(0522)"
+
+def setup_logging():
+    """配置日志记录，同时输出到控制台和文件"""
+    try:
+        # 使用Windows本地应用数据目录
+        import ctypes
+        from ctypes import wintypes
+        
+        # 获取本地应用数据目录
+        CSIDL_LOCAL_APPDATA = 0x001c  # 本地应用数据目录
+        SHGFP_TYPE_CURRENT = 0  # 获取当前值
+        
+        buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+        ctypes.windll.shell32.SHGetFolderPathW(0, CSIDL_LOCAL_APPDATA, 0, SHGFP_TYPE_CURRENT, buf)
+        app_data_dir = buf.value
+        
+        # 创建应用专属日志目录
+        log_dir = os.path.join(app_data_dir, 'ArchiMgr', 'Logs')
+        os.makedirs(log_dir, exist_ok=True)
+        
+        # 生成带日期的日志文件名
+        log_file = os.path.join(log_dir, f'archimgr_{datetime.now().strftime("%Y%m%d")}.log')
+        
+    except Exception as e:
+        # 如果获取应用数据目录失败，使用用户主目录
+        log_dir = os.path.join(os.path.expanduser('~'), 'ArchiMgr', 'Logs')
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f'archimgr_{datetime.now().strftime("%Y%m%d")}.log')
+        logging.error(f"使用备用日志目录: {log_file}, 错误: {str(e)}")
+    
+    # 记录日志文件路径
+    logging.info(f"日志文件路径: {log_file}")
+    
+    # 创建格式化器
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    # 创建文件处理器
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+    
+    # 创建控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    
+    # 配置根日志记录器
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # 禁用SQLAlchemy的日志
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+    logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
+    
+    # 移除所有现有的处理器
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # 添加处理器
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+    
+    logging.info(f"日志文件已创建: {log_file}")
 
 def main():
     """主函数"""
@@ -91,6 +154,8 @@ def main():
         debug_log_msg(f'  {p}')
     debug_log_msg(f'文件编码: {sys.getdefaultencoding()}')
     debug_log_msg(f'文件系统编码: {sys.getfilesystemencoding()}')
+    
+    setup_logging()
     
     def cleanup():
         """清理资源"""

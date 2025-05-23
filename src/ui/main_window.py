@@ -292,7 +292,7 @@ class MainWindow:
         # 导入文件按钮
         self.import_file_btn = ttk.Button(
             button_frame, 
-            text="导入文件", 
+            text="导入档案", 
             command=self.import_files
         )
         self.import_file_btn.pack(side=tk.LEFT)
@@ -483,7 +483,10 @@ class MainWindow:
                     else:
                         file_id = ''
                         person_name = dir_name
-                    material_name, file_date, page_count = get_excel_info(self.import_root_dir, person_name, file_id, class_code)
+                    material_name, file_date, page_count, data_list = get_excel_info(self.import_root_dir, person_name, file_id, class_code)
+                    # 处理 data_list
+                    if data_list:
+                        logging.debug(f"处理文件: {file_name}, 类号: {class_code}, 编号: {file_id}, 人名: {person_name}, 目录名: {dir_name}, 数据列表: {data_list}")
                 except ExcelFileNotFound as e:
                     logging.warning(str(e))
                     material_name, file_date, page_count = '', '', ''
@@ -751,7 +754,7 @@ class MainWindow:
         
         # 创建帮助窗口
         help_window = tk.Toplevel(self.root)
-        help_window.title("使用说明 - 档案检索系统 v1.0(0518)")
+        help_window.title("使用说明 - 档案检索系统 v1.0(0522)")
         help_window.geometry("800x600")  # 设置更大的窗口大小
         
         # 添加滚动条
@@ -777,7 +780,7 @@ class MainWindow:
         scrollbar.config(command=text.yview)
         
         # 设置帮助文本
-        help_text = """档案检索系统使用说明 (v1.0(0518))
+        help_text = """档案检索系统使用说明 (v1.0(0522))
 
 1. 系统注册
    * 初次使用请点击"帮助"菜单中的"用户注册"
@@ -804,11 +807,10 @@ class MainWindow:
    * 支持按列排序（点击列标题）
 
 5. 导入功能
-   * 导入文件: 导入档案文件（所有登录用户可用）
-   * 支持批量导入整个目录
+   * 导入档案: 导入档案文件（所有登录用户可用）
+   * 支持批量导入（请选择包含PDF图片的上级目录）
    * 自动识别并导入PDF文件
    * 自动从Excel文件读取材料信息
-   * 导入时会自动去重，避免重复导入
 
 6. 工具功能
    * 打开程序安装目录: 快速访问程序文件
@@ -875,21 +877,11 @@ class MainWindow:
         # 分隔线
         ttk.Separator(main_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
         
-        # 按钮框架
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(fill=tk.X, pady=(5, 0))
-        
-        # 确定按钮
-        btn = ttk.Button(
-            btn_frame, 
-            text="确定", 
-            command=about_window.destroy,
-            width=10
-        )
-        btn.pack(side=tk.TOP, pady=5)
-        
         # 确保窗口大小合适
         about_window.update_idletasks()
+        
+        # 设置窗口大小固定为合适尺寸
+        about_window.geometry("300x150")
         
         # 设置窗口居中
         about_window.update_idletasks()
@@ -1583,15 +1575,17 @@ class MainWindow:
     def open_archive_directory(self):
         """打开档案文件目录"""
         try:
-            # 从设置中获取档案文件目录，如果没有则使用默认目录
-            archive_dir = self.settings.get('import_root_dir')
+            # 使用当前导入目录，如果存在且有效
+            archive_dir = self.import_root_dir
+            
+            # 如果目录不存在或未设置，提示用户选择
             if not archive_dir or not os.path.exists(archive_dir):
                 # 如果没有设置或目录不存在，询问用户选择目录
                 messagebox.showinfo("提示", "档案文件目录未设置或不存在，请选择档案文件目录")
                 archive_dir = filedialog.askdirectory(title="选择档案文件目录")
                 if archive_dir:
-                    # 保存到设置中
-                    self.settings['import_root_dir'] = archive_dir
+                    # 更新导入目录并保存设置
+                    self.import_root_dir = archive_dir
                     self.save_settings()
                 else:
                     return
