@@ -11,6 +11,10 @@ import re
 import time
 import json
 import hashlib
+import socket
+import datetime
+from tkinter import font as tkfont
+from tkinter import scrolledtext
 
 # 使用兼容性导入
 try:
@@ -67,17 +71,32 @@ class MainWindow:
         # 初始化文件列表和分类映射
         self.all_files = []
         self.category_mapping = {}
+        self.version = version
+        self.db = db
+        self.root = root
         
-        # 用户设置文件路径
+        # 配置目录
         self.config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'config')
         os.makedirs(self.config_dir, exist_ok=True)
+        
+        # 设置文件路径
         self.settings_file = os.path.join(self.config_dir, 'user_settings.json')
         
-        # 注册信息文件路径
-        self.registration_file = os.path.join(self.config_dir, 'registration.txt')
+        # 注册文件路径
+        self.registration_file = os.path.join(self.config_dir, 'registration.dat')
         
-        # 检查注册状态
-        self.is_registered = self.check_registration()
+        # 注册状态
+        self.is_registered = False
+        self.current_org = None  # 当前注册单位
+        
+        # 检查是否已注册
+        if os.path.exists(self.registration_file) and os.path.getsize(self.registration_file) > 0:
+            logging.debug(f"注册文件存在: {self.registration_file}, 正在检查注册状态")
+            self.is_registered = self.check_registration()
+        else:
+            logging.debug(f"注册文件不存在或为空: {self.registration_file}, 状态设为未注册")
+            self.is_registered = False
+        
         logging.info(f"注册状态: {'已注册' if self.is_registered else '未注册'}")
         
         # 加载用户设置
@@ -117,6 +136,24 @@ class MainWindow:
         # 根据注册状态更新界面
         self.update_ui_by_registration()
         
+        # 获取本地IP地址
+        self.local_ip = self._get_local_ip()
+        logging.info(f"本地IP地址: {self.local_ip}")
+        
+    def _get_local_ip(self):
+        """获取本地IP地址"""
+        try:
+            # 创建一个临时socket连接，获取本地IP地址
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # 不需要真正连接
+            s.connect(('8.8.8.8', 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception as e:
+            logging.error(f"获取本地IP地址失败: {str(e)}")
+            return "127.0.0.1"  # 返回本地回环地址作为默认值
+    
     def init_users_table(self):
         """初始化用户表"""
         try:
@@ -170,6 +207,10 @@ class MainWindow:
             # 启用工具菜单
             self.update_tools_permission(True)
             
+            # 启用日志菜单
+            self.log_menu.entryconfigure("查看操作日志", state=tk.NORMAL)
+            self.log_menu.entryconfigure("导出日志", state=tk.NORMAL)
+            
         elif role == 'user':
             # 普通用户菜单
             self.file_menu.add_command(label="退出登录", command=self.logout)
@@ -179,14 +220,19 @@ class MainWindow:
             # 禁用工具菜单
             self.update_tools_permission(False)
             
+            # 禁用日志菜单
+            self.log_menu.entryconfigure("查看操作日志", state=tk.DISABLED)
+            self.log_menu.entryconfigure("导出日志", state=tk.DISABLED)
+            
         else:
             # 未登录菜单
             self.file_menu.add_command(label="登录", command=self.show_login_dialog)
             self.file_menu.add_separator()
             self.file_menu.add_command(label="退出系统", command=self.root.quit)
             
-            # 禁用工具菜单
-            self.update_tools_permission(False)
+            # 禁用日志菜单
+            self.log_menu.entryconfigure("查看操作日志", state=tk.DISABLED)
+            self.log_menu.entryconfigure("导出日志", state=tk.DISABLED)
         
     def update_tools_permission(self, is_admin):
         """更新工具栏权限"""
@@ -208,19 +254,31 @@ class MainWindow:
             # 管理员特有权限
             if is_admin:
                 # 启用清理数据库菜单
-                self.tools_menu.entryconfigure("清理数据库", state=tk.NORMAL)
+                if hasattr(self, 'tools_menu'):
+                    self.tools_menu.entryconfigure("清理数据库", state=tk.NORMAL)
+                # 启用安全菜单
+                if hasattr(self, 'security_menu'):
+                    self.security_menu.entryconfigure("档案完整性检查", state=tk.NORMAL)
             else:
                 # 禁用清理数据库菜单
-                self.tools_menu.entryconfigure("清理数据库", state=tk.DISABLED)
+                if hasattr(self, 'tools_menu'):
+                    self.tools_menu.entryconfigure("清理数据库", state=tk.DISABLED)
+                # 禁用安全菜单
+                if hasattr(self, 'security_menu'):
+                    self.security_menu.entryconfigure("档案完整性检查", state=tk.DISABLED)
 
     def setup_ui(self):
         """设置用户界面"""
         # 设置窗口标题
-        self.root.title("档案检索系统")
+        self.root.title(f"档案检索系统 {self.version}")
         
         # 设置窗口大小和位置
         window_width = 1024
         window_height = 768
+        self.root.geometry(f"{window_width}x{window_height}")
+        self.root.minsize(800, 600)  # 设置最小尺寸
+        
+        # 将窗口居中
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         x = (screen_width - window_width) // 2
@@ -243,6 +301,18 @@ class MainWindow:
         # 创建状态栏（最后创建，显示在底部）
         self.create_status_bar()
         
+        # 确保状态栏显示与注册状态一致（调试）
+        logging.debug(f"初始化UI完成，注册状态: {'已注册' if self.is_registered else '未注册'}")
+        if hasattr(self, 'reg_status_var'):
+            status_text = self.reg_status_var.get()
+            logging.debug(f"状态栏显示: {status_text}")
+            
+            # 确保状态栏显示与注册状态一致
+            expected_status = "已注册" if self.is_registered else "未注册"
+            if expected_status not in status_text:
+                logging.warning(f"状态栏显示与注册状态不一致，强制更新")
+                self.update_status_bar()
+        
     def create_menu(self):
         """创建菜单栏"""
         menubar = tk.Menu(self.root)
@@ -256,14 +326,18 @@ class MainWindow:
         self.file_menu.add_command(label="登录", command=self.show_login_dialog)
         
         # 帮助菜单
-        help_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="帮助", menu=help_menu)
-        help_menu.add_command(label="使用说明", command=self.show_help)
+        self.help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="帮助", menu=self.help_menu)
+        self.help_menu.add_command(label="使用说明", command=self.show_help)
         
         # 添加用户注册选项（未注册时可用）
-        help_menu.add_command(label="用户注册", command=self.show_registration_dialog)
+        self.help_menu.add_command(label="用户注册", command=self.show_registration_dialog)
         
-        help_menu.add_command(label="关于", command=self.show_about)
+        # 根据注册状态设置注册菜单项的状态
+        # reg_state = tk.DISABLED if self.is_registered else tk.NORMAL
+        # self.help_menu.entryconfigure("用户注册", state=reg_state)
+        
+        self.help_menu.add_command(label="关于", command=self.show_about)
         
         # 工具菜单
         self.tools_menu = tk.Menu(menubar, tearoff=0)
@@ -273,6 +347,17 @@ class MainWindow:
         self.tools_menu.add_command(label="打开数据库位置", command=self.open_database_location)
         self.tools_menu.add_separator()
         self.tools_menu.add_command(label="清理数据库", command=self.cleanup_database)
+        
+        # 安全菜单
+        self.security_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="安全", menu=self.security_menu)
+        self.security_menu.add_command(label="档案完整性检查", command=self.show_integrity_check)
+        
+        # 日志菜单
+        self.log_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="日志", menu=self.log_menu)
+        self.log_menu.add_command(label="查看操作日志", command=self.show_operation_logs)
+        self.log_menu.add_command(label="导出日志", command=self.export_logs)
         
         # 用户管理菜单（初始时不显示，管理员登录后再添加）
         self.user_menu = tk.Menu(menubar, tearoff=0)
@@ -437,80 +522,278 @@ class MainWindow:
         # 清空现有列表
         self.file_list.delete(*self.file_list.get_children())
         
-        logging.debug(f"要更新的文件列表数量: {len(files)}")
-        if files:
-            sample_files = files[:3]
-            logging.debug(f"文件样本: {sample_files}")
+        # 添加右键菜单
+        self.create_file_context_menu()
         
-        try:
-            # 筛选只显示PDF文件
-            pdf_files = []
-            for file_name, file_path in files:
-                # 将文件名转为小写进行判断
-                if file_name.lower().endswith('.pdf'):
-                    pdf_files.append((file_name, file_path))
+        # 添加文件到列表
+        for file in files:
+            # 检查文件数据结构
+            if len(file) < 2:
+                logging.warning(f"文件数据结构不完整: {file}")
+                continue
+                
+            try:
+                # 提取文件信息
+                # 根据数据库查询结果解析数据
+                # person_files表结构: id, person_name, file_name, file_path, category_id, dir_name, file_id
+                if len(file) >= 7:  # 完整的person_files记录
+                    file_id = file[6] if file[6] else ""  # file_id
+                    person_name = file[1] if file[1] else ""  # person_name
                     
-            logging.debug(f"筛选后的PDF文件数量: {len(pdf_files)}")
-            
-            # 插入新的文件记录
-            for file_name, file_path in pdf_files:
-                # 从文件路径中提取人名和文件夹名
-                dir_name = os.path.basename(os.path.dirname(file_path))
+                    # 从文件名中提取类号和材料名称
+                    file_name = file[2] if file[2] else ""  # file_name
+                    
+                    # 提取类号 - 应该是3-1, 4-1-1这种格式
+                    class_code = ""
+                    material_name = ""
+                    date = ""
+                    page_count = ""
+                    
+                    # 解析文件名，提取信息
+                    # 文件名格式可能是: 3-1-1-会议记录.pdf 或 3-1-会议记录.pdf
+                    if "-" in file_name:
+                        parts = file_name.split("-")
+                        
+                        # 提取类号部分
+                        if len(parts) >= 2:
+                            # 检查前两部分是否都是数字，构建类号
+                            if parts[0].isdigit():
+                                class_code = parts[0]
+                                if len(parts) >= 2 and parts[1].isdigit():
+                                    class_code += "-" + parts[1]
+                                    if len(parts) >= 3 and parts[2].isdigit():
+                                        class_code += "-" + parts[2]
+                        
+                        # 提取材料名称
+                        # 材料名称是类号后面的部分，直到文件扩展名前
+                        material_index = 0
+                        for i, part in enumerate(parts):
+                            if not part.isdigit() or i >= 3:
+                                material_index = i
+                                break
+                        
+                        if material_index > 0 and material_index < len(parts):
+                            # 获取材料名称部分
+                            material_name_parts = parts[material_index:]
+                            material_name_str = "-".join(material_name_parts)
+                            
+                            # 移除文件扩展名
+                            if "." in material_name_str:
+                                material_name = material_name_str.split(".")[0]
+                            else:
+                                material_name = material_name_str
+                    
+                    # 文件路径
+                    file_path = file[3] if file[3] else ""  # file_path
+                    
+                elif len(file) == 2:  # 简单的文件名和路径
+                    file_name = file[0] if file[0] else ""
+                    file_path = file[1] if file[1] else ""
+                    
+                    # 其他字段留空
+                    file_id = ""
+                    person_name = ""
+                    class_code = ""
+                    material_name = ""
+                    date = ""
+                    page_count = ""
+                    
+                    # 尝试从文件名中提取类号和材料名称
+                    if "-" in file_name:
+                        parts = file_name.split("-")
+                        
+                        # 提取类号部分
+                        if len(parts) >= 2:
+                            # 检查前两部分是否都是数字，构建类号
+                            if parts[0].isdigit():
+                                class_code = parts[0]
+                                if len(parts) >= 2 and parts[1].isdigit():
+                                    class_code += "-" + parts[1]
+                                    if len(parts) >= 3 and parts[2].isdigit():
+                                        class_code += "-" + parts[2]
+                        
+                        # 提取材料名称
+                        material_index = 0
+                        for i, part in enumerate(parts):
+                            if not part.isdigit() or i >= 3:
+                                material_index = i
+                                break
+                        
+                        if material_index > 0 and material_index < len(parts):
+                            # 获取材料名称部分
+                            material_name_parts = parts[material_index:]
+                            material_name_str = "-".join(material_name_parts)
+                            
+                            # 移除文件扩展名
+                            if "." in material_name_str:
+                                material_name = material_name_str.split(".")[0]
+                            else:
+                                material_name = material_name_str
+                else:
+                    # 尝试从现有数据中提取
+                    file_id = file[0] if len(file) > 0 else ""
+                    person_name = file[1] if len(file) > 1 else ""
+                    class_code = file[2] if len(file) > 2 else ""
+                    material_name = file[3] if len(file) > 3 else ""
+                    file_name = file[4] if len(file) > 4 else ""
+                    date = file[5] if len(file) > 5 else ""
+                    page_count = file[6] if len(file) > 6 else ""
+                    file_path = file[7] if len(file) > 7 else ""
                 
-                # 提取编号 - 获取文件夹名中的数字前缀
-                # 正则表达式提取开头的连续数字
-                match = re.match(r'^(\d+)(.*)', dir_name)
-                file_id = ""
-                person_name = dir_name
-                
-                if match:
-                    file_id = match.group(1)
-                    # 处理姓名，去掉数字部分只保留人名
-                    person_name = match.group(2).strip()
-                
-                # 文件名就是类号（例如 3-1.pdf 的类号就是 3-1）
-                class_code = os.path.splitext(file_name)[0]
-                
-                logging.debug(f"处理文件: {file_name}, 类号: {class_code}, 编号: {file_id}, 人名: {person_name}, 目录名: {dir_name}")
-                
-                # 从Excel获取文件信息（材料名称、日期、页数）
-                try:
-                    # dir_name = 文件夹名（如 123张三），需分解为编号和姓名
-                    match = re.match(r'^(\d+)(.+)$', dir_name)
-                    if match:
-                        file_id = match.group(1)
-                        person_name = match.group(2).strip()
-                    else:
-                        file_id = ''
-                        person_name = dir_name
-                    material_name, file_date, page_count, data_list = get_excel_info(self.import_root_dir, person_name, file_id, class_code)
-                    # 处理 data_list
-                    if data_list:
-                        logging.debug(f"处理文件: {file_name}, 类号: {class_code}, 编号: {file_id}, 人名: {person_name}, 目录名: {dir_name}, 数据列表: {data_list}")
-                except ExcelFileNotFound as e:
-                    logging.warning(str(e))
-                    material_name, file_date, page_count = '', '', ''
-                    messagebox.showwarning("未找到Excel文件", str(e))
-                except Exception as e:
-                    logging.error(f"Excel信息读取失败: {str(e)}")
-                    material_name, file_date, page_count = '', '', ''
-                    messagebox.showerror("Excel读取错误", f"读取Excel信息时发生错误：{str(e)}")
-                
+                # 确保文件路径是字符串
+                if not isinstance(file_path, str):
+                    file_path = str(file_path) if file_path is not None else ""
+                    
                 # 插入到列表
-                self.file_list.insert('', 'end', values=(
-                    file_id,
-                    person_name,
-                    class_code,
-                    material_name,
-                    file_name,
-                    file_date,
-                    page_count,
-                    file_path
+                self.file_list.insert('', tk.END, values=(
+                    file_id, person_name, class_code, material_name, file_name, date, page_count, file_path
                 ))
+            except Exception as e:
+                logging.error(f"处理文件记录时出错: {str(e)}, 文件: {file}")
+            
+        # 更新状态栏
+        self.update_status_bar()
+        
+    def create_file_context_menu(self):
+        """创建文件列表右键菜单"""
+        self.file_context_menu = tk.Menu(self.root, tearoff=0)
+        self.file_context_menu.add_command(label="打开", command=self.open_selected_file)
+        self.file_context_menu.add_command(label="打印", command=self.print_selected_file)
+        
+        # 绑定右键点击事件
+        self.file_list.bind("<Button-3>", self.show_file_context_menu)
+        
+    def show_file_context_menu(self, event):
+        """显示右键菜单"""
+        # 获取鼠标点击位置对应的项
+        item = self.file_list.identify_row(event.y)
+        if item:
+            # 选中该项
+            self.file_list.selection_set(item)
+            # 显示菜单
+            self.file_context_menu.post(event.x_root, event.y_root)
+            
+    def open_selected_file(self):
+        """打开选中的文件"""
+        selection = self.file_list.selection()
+        if selection:
+            # 模拟双击事件
+            self.on_file_double_click(None)
+            
+    def print_selected_file(self):
+        """打印选中的文件"""
+        selection = self.file_list.selection()
+        if not selection:
+            return
+            
+        # 获取文件路径
+        item = self.file_list.item(selection[0])
+        values = item['values']
+        if len(values) < 8:  # 确保有足够的列
+            messagebox.showerror("错误", "无法获取文件路径")
+            return
+            
+        file_path = values[7]  # 路径在第8列
+        file_id = values[0]    # 编号在第1列
+        person_name = values[1]  # 姓名在第2列
+        
+        if not os.path.exists(file_path):
+            messagebox.showerror("错误", f"文件不存在: {file_path}")
+            return
+            
+        try:
+            # 打印确认
+            confirm = messagebox.askyesno("打印确认", f"确定要打印文件 {os.path.basename(file_path)} 吗？")
+            if not confirm:
+                return
+                
+            # 打印文件
+            if sys.platform.startswith('win'):
+                # Windows系统使用默认打印机打印
+                os.startfile(file_path, "print")
+            else:
+                # 其他系统使用lpr命令打印
+                try:
+                    subprocess.call(['lpr', file_path])
+                except:
+                    messagebox.showerror("错误", "当前系统不支持直接打印，请手动打开文件后打印")
+                    # 打开文件
+                    if sys.platform.startswith('darwin'):
+                        subprocess.call(['open', file_path])
+                    else:
+                        subprocess.call(['xdg-open', file_path])
+            
+            # 记录打印日志
+            if self.current_user:
+                self.db.add_log(
+                    username=self.current_user[1],  # 使用用户名而不是整个用户元组
+                    operation_type="print",
+                    target_id=file_id,
+                    target_name=person_name,
+                    details=f"打印文件: {os.path.basename(file_path)}",
+                    ip_address=self.local_ip
+                )
+                
+            messagebox.showinfo("打印", "文件已发送到打印机")
                 
         except Exception as e:
-            logging.error(f"更新文件列表失败: {str(e)}")
-            messagebox.showerror("错误", f"更新文件列表失败：{str(e)}")
+            logging.error(f"打印文件失败: {str(e)}")
+            messagebox.showerror("错误", f"打印文件失败: {str(e)}")
+            
+    def on_file_double_click(self, event):
+        """双击文件时的处理"""
+        # 获取选中的项
+        selection = self.file_list.selection()
+        if not selection:
+            return
+            
+        # 获取文件路径
+        item = self.file_list.item(selection[0])
+        values = item['values']
+        if not values or len(values) < 8:  # 确保有足够的列
+            messagebox.showerror("错误", "无法获取文件路径")
+            return
+            
+        file_path = values[7]  # 路径在第8列
+        file_id = values[0]    # 编号在第1列
+        person_name = values[1]  # 姓名在第2列
+        
+        if not file_path or not isinstance(file_path, str):
+            messagebox.showerror("错误", "文件路径无效")
+            return
+        
+        # 去除可能的空格
+        file_path = file_path.strip()
+        
+        if not os.path.exists(file_path):
+            messagebox.showerror("错误", f"文件不存在: {file_path}")
+            return
+            
+        try:
+            # 打开文件
+            logging.info(f"尝试打开文件: {file_path}")
+            if sys.platform.startswith('win'):
+                os.startfile(file_path)
+            elif sys.platform.startswith('darwin'):
+                subprocess.call(['open', file_path])
+            else:
+                subprocess.call(['xdg-open', file_path])
+                
+            # 记录查看日志
+            if hasattr(self, 'current_user') and self.current_user:
+                username = self.current_user[1] if isinstance(self.current_user, (list, tuple)) and len(self.current_user) > 1 else "未知用户"
+                self.db.add_log(
+                    username=username,
+                    operation_type="view",
+                    target_id=file_id,
+                    target_name=person_name,
+                    details=f"查看文件: {os.path.basename(file_path)}",
+                    ip_address=self.local_ip
+                )
+                
+        except Exception as e:
+            logging.error(f"打开文件失败: {str(e)}")
+            messagebox.showerror("错误", f"打开文件失败: {str(e)}")
 
     def hash_password(self, password):
         """对密码进行哈希加密"""
@@ -539,18 +822,31 @@ class MainWindow:
             return False, f"注册失败: {str(e)}"
     
     def validate_login(self, username, password):
-        """验证登录信息"""
+        """验证用户登录"""
         try:
+            # 查询用户信息
+            self.db.cursor.execute('SELECT id, username, real_name, role, password FROM users WHERE username = ?', (username,))
+            result = self.db.cursor.fetchone()
+            
+            if result is None:
+                return False, None  # 用户不存在
+                
+            user_id, user_name, real_name, role, stored_password = result
+            
+            # 验证密码
             hashed_password = self.hash_password(password)
-            self.db.cursor.execute(
-                'SELECT id, username, real_name, role FROM users WHERE username = ? AND password = ?',
-                (username, hashed_password)
-            )
-            user = self.db.cursor.fetchone()
-            if user:
-                return True, user
+            if hashed_password == stored_password:
+                # 记录登录日志
+                self.db.add_log(
+                    username=username,
+                    operation_type="login",
+                    details="用户登录成功",
+                    ip_address=self.local_ip
+                )
+                # 返回完整的用户信息元组
+                return True, (user_id, user_name, real_name, role)
             else:
-                return False, None
+                return False, None  # 密码错误
         except Exception as e:
             logging.error(f"验证登录失败: {str(e)}")
             return False, None
@@ -704,11 +1000,15 @@ class MainWindow:
             success, user = self.validate_login(username, password)
             if success:
                 self.current_user = user
+                # 显示真实姓名
                 self.login_status_var.set(f"已登录: {user[2]}")
                 messagebox.showinfo("登录成功", f"欢迎回来，{user[2]}！")
                 
                 # 更新菜单和权限
                 self.update_menu_by_role(user[3])
+                
+                # 确保状态栏显示正确的注册状态
+                self.update_status_bar()
                 
                 login_dialog.destroy()
             else:
@@ -748,13 +1048,16 @@ class MainWindow:
         # 更新菜单和权限
         self.update_menu_by_role(None)
         
+        # 确保状态栏显示正确的注册状态
+        self.update_status_bar()
+    
     def show_help(self):
         """显示帮助信息"""
         logging.debug("显示帮助信息")
         
         # 创建帮助窗口
         help_window = tk.Toplevel(self.root)
-        help_window.title("使用说明 - 档案检索系统 v1.0(0522)")
+        help_window.title("使用说明 - 档案检索系统 V1.0")
         help_window.geometry("800x600")  # 设置更大的窗口大小
         
         # 添加滚动条
@@ -780,13 +1083,13 @@ class MainWindow:
         scrollbar.config(command=text.yview)
         
         # 设置帮助文本
-        help_text = """档案检索系统使用说明 (v1.0(0522))
+        help_text = """档案检索系统使用说明 (v1.0)
 
 1. 系统注册
    * 初次使用请点击"帮助"菜单中的"用户注册"
    * 输入注册码和用户名称进行注册
    * 注册成功后重启程序即可使用全部功能
-   * 注册信息保存在程序目录下的registration.txt文件中
+   * 注册信息保存在程序目录下的registration.dat文件中
 
 2. 用户登录
    * 默认管理员账号: admin 密码: admin123
@@ -853,7 +1156,7 @@ class MainWindow:
         
         # 获取注册状态
         is_registered = hasattr(self, 'is_registered') and self.is_registered
-        registration_info = "已注册：新都区自然资源规划局" if is_registered else "未注册"
+        registration_info = f"已注册：{self.current_org}" if is_registered else "未注册"
         
         # 创建关于窗口
         about_window = tk.Toplevel(self.root)
@@ -870,7 +1173,7 @@ class MainWindow:
         # 标题和版本信息
         ttk.Label(
             main_frame, 
-            text=f"档案检索系统\n\n版本: v{self.version}\n{registration_info}",
+            text=f"档案检索系统\n\n版本: {self.version}\n{registration_info}",
             justify=tk.CENTER
         ).pack(pady=10)
         
@@ -1199,128 +1502,103 @@ class MainWindow:
             messagebox.showerror("错误", f"导入失败：{str(e)}")
 
     def search_person(self):
-        """搜索人员档案（支持分类过滤）"""
-        # 取消左侧分类的选择
-        if hasattr(self, 'tree') and self.tree.selection():
-            for item in self.tree.selection():
-                self.tree.selection_remove(item)
-        
+        """搜索人员档案"""
         search_name = self.search_name_var.get().strip()
         search_id = self.search_id_var.get().strip()
         
+        if not search_name and not search_id:
+            messagebox.showinfo("提示", "请输入姓名或编号进行搜索")
+            return
+            
+        # 保存当前搜索条件
+        self.current_search_name = search_name
+        self.current_search_id = search_id
+        self.has_searched = True
+        
         try:
-            # 清理之前的搜索结果
-            self.file_list.delete(*self.file_list.get_children())
-            
-            # 清理搜索状态
-            if not search_name and not search_id:
-                self.current_search_name = None
-                self.current_search_id = None
-                self.has_searched = False
-                self.search_result_var.set("就绪")
-                messagebox.showinfo("提示", "请输入姓名或编号进行搜索")
-                return
-            
-            # 保存当前搜索的人名和编号
-            self.current_search_name = search_name if search_name else None
-            self.current_search_id = search_id if search_id else None
-            
-            # 标记已进行搜索
-            self.has_searched = True
-            
-            logging.info(f"执行搜索：姓名='{search_name}', 编号='{search_id}'")
-            # 直接执行搜索，不检查分类选择
-            # 因为我们已经取消了分类选择，所以这里直接执行搜索逻辑
-            
-            # 如果只通过姓名搜索，检查是否有重名人员
-            if search_name and not search_id:
-                # 获取所有不同的编号
-                self.db.cursor.execute('''
-                    SELECT DISTINCT file_id 
-                    FROM person_files 
-                    WHERE person_name = ?
-                    ORDER BY file_id
-                ''', (search_name,))
-                
-                id_list = [str(row[0]) for row in self.db.cursor.fetchall() if row[0]]
-                
-                if len(id_list) > 1:
-                    # 设置重名标志
-                    self.has_duplicate_names = True
-                    # 找到多个不同编号的相同姓名，显示所有编号并提示用户输入
-                    id_text = ", ".join(id_list)
-                    logging.info(f"发现 {len(id_list)} 个同名人员，编号: {id_text}")
-                    self.search_result_var.set(f"发现 {len(id_list)} 个同名人员，请选择编号: {id_text}")
-                    messagebox.showinfo(
-                        "发现重名", 
-                        f"发现 {len(id_list)} 个同名人员，请选择编号后重新搜索：\n\n" +
-                        "\n".join([f"编号: {id}" for id in id_list])
-                    )
-                    # 清空文件列表，等待用户输入编号
-                    self.file_list.delete(*self.file_list.get_children())
-                    return
-                else:
-                    # 如果没有重名，清除重名标志
-                    self.has_duplicate_names = False
-            
-            # 构建查询
-            query = '''
-                SELECT DISTINCT file_name, file_path 
-                FROM person_files 
-                WHERE 1=1
-            '''
+            # 构建查询条件
+            conditions = []
             params = []
             
-            # 添加文件名过滤条件
-            query += ' AND file_name NOT LIKE ? AND file_name NOT LIKE ? AND file_name LIKE ?'
-            params.extend(['~%', '.%', '%.pdf'])
-            
-            # 添加人名过滤条件 - 使用完全匹配
             if search_name:
-                query += ' AND person_name = ?'
-                params.append(search_name)
-            
-            # 添加编号过滤条件
+                conditions.append("person_name LIKE ?")
+                params.append(f"%{search_name}%")
+                
             if search_id:
-                query += ' AND file_id = ?'
-                params.append(search_id)
-            
-            query += ' ORDER BY file_name'
-            
-            logging.info(f"搜索查询SQL: {query}, 参数: {params}")
+                conditions.append("file_id LIKE ?")
+                params.append(f"%{search_id}%")
+                
+            # 组合查询条件
+            query = """
+                SELECT 
+                    id, person_name, file_name, file_path, 
+                    category_id, dir_name, file_id
+                FROM person_files 
+                WHERE """ + " OR ".join(conditions) + """
+                ORDER BY person_name, file_name
+            """
             
             # 执行查询
             self.db.cursor.execute(query, params)
-            files = self.db.cursor.fetchall()
+            results = self.db.cursor.fetchall()
             
-            # 更新文件列表显示
-            self.update_file_list(files)
-            
-            # 更新状态栏显示搜索结果数量
-            if files:
-                result_text = f"找到 {len(files)} 个匹配文件"
-                self.search_result_var.set(result_text)
-                logging.info(f"搜索结果: {result_text}")
+            # 检查是否有结果
+            if not results:
+                messagebox.showinfo("提示", "未找到匹配的档案")
+                self.file_list.delete(*self.file_list.get_children())
+                self.search_result_var.set("搜索结果: 0 个文件")
+                return
                 
-                # 显示搜索结果提示
-                if len(files) > 0:
-                    messagebox.showinfo("搜索结果", result_text)
+            # 检查是否有重名情况
+            if search_name and not search_id:
+                names = set(row[1] for row in results)  # 获取所有人名
+                if len(names) > 1:
+                    self.has_duplicate_names = True
+                    messagebox.showwarning("提示", "存在多个同名人员，请输入编号进一步筛选")
+                else:
+                    self.has_duplicate_names = False
             else:
-                self.search_result_var.set("未找到匹配文件")
-                logging.info("搜索结果: 未找到匹配文件")
-                messagebox.showinfo("搜索结果", "未找到匹配文件")
-                
+                self.has_duplicate_names = False
+            
+            # 更新文件列表
+            self.update_file_list(results)
+            
+            # 记录搜索日志
+            if self.current_user:
+                details = f"搜索条件: 姓名={search_name}, 编号={search_id}, 结果数量={len(results)}"
+                self.db.add_log(
+                    username=self.current_user[1],  # 使用用户名而不是整个用户元组
+                    operation_type="search",
+                    target_name=search_name or search_id,
+                    details=details,
+                    ip_address=self.local_ip
+                )
+            
+            # 更新状态栏
+            self.search_result_var.set(f"搜索结果: {len(results)} 个文件")
+            
         except Exception as e:
-            logging.error(f"搜索失败: {str(e)}", exc_info=True)
-            messagebox.showerror("错误", f"搜索失败：{str(e)}")
-            self.search_result_var.set("搜索失败")
-
+            logging.error(f"搜索失败: {str(e)}")
+            messagebox.showerror("错误", f"搜索失败: {str(e)}")
+    
     def extract_category_num(self, filename):
         """从文件名中提取分类号"""
+        if not filename or not isinstance(filename, str):
+            return None
+            
+        # 文件名格式可能是: 3-1-1-会议记录.pdf 或 3-1-会议记录.pdf
         parts = filename.split('-')
-        if len(parts) >= 2 and parts[0].isdigit():
-            return f"{parts[0]}-{parts[1]}" if parts[1].isdigit() else parts[0]
-        return None
+        if len(parts) < 2 or not parts[0].isdigit():
+            return None
+            
+        # 构建类号
+        class_code = parts[0]
+        if len(parts) >= 2 and parts[1].isdigit():
+            class_code += "-" + parts[1]
+            if len(parts) >= 3 and parts[2].isdigit():
+                class_code += "-" + parts[2]
+                
+        return class_code
 
     def on_category_selected(self, event):
         """处理分类选择事件"""
@@ -1370,18 +1648,34 @@ class MainWindow:
                 if category_code:
                     # 构建查询，精确匹配分类代码-开头
                     query = '''
-                        SELECT DISTINCT file_name, file_path 
+                        SELECT 
+                            id, person_name, file_name, file_path, 
+                            category_id, dir_name, file_id
                         FROM person_files 
                         WHERE (
                             file_name LIKE ? OR    -- 精确的分类代码-开头 (4-1-%)
-                            file_name LIKE ?       -- 点号分隔的格式 (4.1.%)
+                            file_name LIKE ? OR    -- 带点的格式 (4.1.%)
+                            file_name LIKE ?       -- 简单格式 (4-%)
                         )
                         AND file_name NOT LIKE '~%'
                         AND file_name NOT LIKE '.%'
                         AND file_name LIKE '%.pdf'
                     '''
-                    # 两种模式匹配: 标准格式(4-1-%)和点分格式(4.1.%)
-                    params = [f'{category_code}-%', f'{category_code.replace("-", ".")}%']
+                    # 多种模式匹配
+                    category_parts = category_code.split('-')
+                    if len(category_parts) == 2:  # 二级分类，如 4-1
+                        main_code, sub_code = category_parts
+                        params = [
+                            f'{main_code}-{sub_code}-%',  # 4-1-%
+                            f'{main_code}.{sub_code}.%',  # 4.1.%
+                            f'{main_code}-%'              # 4-%
+                        ]
+                    else:
+                        params = [
+                            f'{category_code}-%',  # 任何以该编码开头的
+                            f'{category_code.replace("-", ".")}%',  # 替换-为.的格式
+                            f'{category_code.split("-")[0]}-%'  # 只匹配主分类
+                        ]
                     
                     # 检查是否有搜索条件
                     if not (hasattr(self, 'current_search_name') and self.current_search_name):
@@ -1450,7 +1744,9 @@ class MainWindow:
                     else:
                         # 构建查询，精确匹配分类代码-开头
                         query = '''
-                            SELECT DISTINCT file_name, file_path 
+                            SELECT 
+                                id, person_name, file_name, file_path, 
+                                category_id, dir_name, file_id
                             FROM person_files 
                             WHERE (
                                 file_name LIKE ? OR    -- 精确的分类代码-开头 (4-%)
@@ -1515,36 +1811,307 @@ class MainWindow:
         for category in categories:
             self.tree.insert('', 'end', text=category[0])
     
-    def on_file_double_click(self, event):
-        """处理文件双击事件"""
-        selected_items = self.file_list.selection()
-        if not selected_items:
+    def show_operation_logs(self):
+        """显示操作日志"""
+        if not self.current_user or not hasattr(self.db, 'get_logs'):
+            messagebox.showerror("错误", "请先登录或系统不支持日志功能")
             return
+            
+        # 创建日志查询窗口
+        log_window = tk.Toplevel(self.root)
+        log_window.title("操作日志查询")
+        log_window.geometry("900x600")
+        log_window.minsize(800, 500)
         
-        # 获取选中项的完整路径
-        item = selected_items[0]
-        file_path = self.file_list.item(item)['values'][7]  # 第8列是路径
-        
+        # 设置窗口图标
         try:
-            # 检查文件是否存在
-            if not os.path.exists(file_path):
-                messagebox.showerror("错误", f"找不到文件：\n{file_path}")
-                logging.error(f"文件不存在: {file_path}")
-                return
-            
-            # 打开文件
-            logging.debug(f"打开文件: {file_path}")
-            if sys.platform == 'win32':
-                os.startfile(file_path)
-            elif sys.platform == 'darwin':  # macOS
-                subprocess.run(['open', file_path])
-            else:  # linux
-                subprocess.run(['xdg-open', file_path])
-            
+            from src.utils.paths import get_icon_path
+            icon_path = get_icon_path()
+            if os.path.exists(icon_path):
+                log_window.iconbitmap(icon_path)
         except Exception as e:
-            error_msg = f"打开文件失败：{str(e)}"
-            logging.error(error_msg)
-            messagebox.showerror("错误", error_msg)
+            logging.warning(f"设置图标失败: {str(e)}")
+        
+        # 创建查询条件框架
+        query_frame = ttk.Frame(log_window, padding="10 10 10 10")
+        query_frame.pack(fill=tk.X)
+        
+        # 用户名筛选
+        ttk.Label(query_frame, text="用户名:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        username_var = tk.StringVar()
+        username_entry = ttk.Entry(query_frame, textvariable=username_var, width=15)
+        username_entry.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        # 操作类型筛选
+        ttk.Label(query_frame, text="操作类型:").grid(row=0, column=2, padx=5, pady=5, sticky=tk.W)
+        operation_type_var = tk.StringVar()
+        operation_types = ["", "login", "search", "view", "print"]
+        operation_type_combo = ttk.Combobox(query_frame, textvariable=operation_type_var, values=operation_types, width=10)
+        operation_type_combo.grid(row=0, column=3, padx=5, pady=5, sticky=tk.W)
+        
+        # 日期范围筛选
+        ttk.Label(query_frame, text="开始日期:").grid(row=0, column=4, padx=5, pady=5, sticky=tk.W)
+        start_date_var = tk.StringVar()
+        start_date_entry = ttk.Entry(query_frame, textvariable=start_date_var, width=12)
+        start_date_entry.grid(row=0, column=5, padx=5, pady=5, sticky=tk.W)
+        
+        ttk.Label(query_frame, text="结束日期:").grid(row=0, column=6, padx=5, pady=5, sticky=tk.W)
+        end_date_var = tk.StringVar()
+        end_date_entry = ttk.Entry(query_frame, textvariable=end_date_var, width=12)
+        end_date_entry.grid(row=0, column=7, padx=5, pady=5, sticky=tk.W)
+        
+        # 设置默认日期为今天
+        today = datetime.date.today().strftime("%Y-%m-%d")
+        start_date_var.set(today)
+        end_date_var.set(today)
+        
+        # 创建日志列表
+        log_frame = ttk.Frame(log_window)
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # 创建Treeview显示日志
+        columns = ('id', 'username', 'operation_type', 'target_id', 'target_name', 'details', 'operation_time', 'ip_address')
+        log_tree = ttk.Treeview(log_frame, columns=columns, show='headings')
+        
+        # 设置列标题
+        log_tree.heading('id', text='ID')
+        log_tree.heading('username', text='用户名')
+        log_tree.heading('operation_type', text='操作类型')
+        log_tree.heading('target_id', text='目标ID')
+        log_tree.heading('target_name', text='目标名称')
+        log_tree.heading('details', text='详情')
+        log_tree.heading('operation_time', text='操作时间')
+        log_tree.heading('ip_address', text='IP地址')
+        
+        # 设置列宽
+        log_tree.column('id', width=50)
+        log_tree.column('username', width=80)
+        log_tree.column('operation_type', width=80)
+        log_tree.column('target_id', width=80)
+        log_tree.column('target_name', width=100)
+        log_tree.column('details', width=200)
+        log_tree.column('operation_time', width=150)
+        log_tree.column('ip_address', width=120)
+        
+        # 添加滚动条
+        scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=log_tree.yview)
+        log_tree.configure(yscrollcommand=scrollbar.set)
+        
+        log_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 按钮框架
+        button_frame = ttk.Frame(log_window, padding="10 5 10 10")
+        button_frame.pack(fill=tk.X)
+        
+        # 查询按钮
+        def query_logs():
+            username = username_var.get().strip()
+            operation_type = operation_type_var.get()
+            start_date = start_date_var.get().strip()
+            end_date = end_date_var.get().strip()
+            
+            # 清空现有数据
+            for item in log_tree.get_children():
+                log_tree.delete(item)
+                
+            # 查询日志
+            logs = self.db.get_logs(
+                username=username if username else None,
+                operation_type=operation_type if operation_type else None,
+                start_date=start_date if start_date else None,
+                end_date=end_date if end_date else None
+            )
+            
+            # 显示日志
+            for log in logs:
+                log_tree.insert('', tk.END, values=log)
+                
+            # 更新状态
+            status_var.set(f"共找到 {len(logs)} 条日志记录")
+        
+        query_btn = ttk.Button(button_frame, text="查询", command=query_logs)
+        query_btn.pack(side=tk.LEFT, padx=5)
+        
+        # 导出按钮
+        def export_displayed_logs():
+            # 获取当前显示的所有日志
+            logs = []
+            for item_id in log_tree.get_children():
+                item = log_tree.item(item_id)
+                logs.append(item['values'])
+                
+            if not logs:
+                messagebox.showinfo("提示", "没有可导出的日志")
+                return
+                
+            # 选择保存路径
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel文件", "*.xlsx"), ("所有文件", "*.*")],
+                title="保存日志文件"
+            )
+            
+            if not file_path:
+                return
+                
+            try:
+                # 创建DataFrame
+                df = pd.DataFrame(logs, columns=columns)
+                
+                # 保存为Excel
+                df.to_excel(file_path, index=False)
+                messagebox.showinfo("成功", f"日志已导出到: {file_path}")
+                
+            except Exception as e:
+                logging.error(f"导出日志失败: {str(e)}")
+                messagebox.showerror("错误", f"导出失败: {str(e)}")
+        
+        export_btn = ttk.Button(button_frame, text="导出当前结果", command=export_displayed_logs)
+        export_btn.pack(side=tk.LEFT, padx=5)
+        
+        # 关闭按钮
+        close_btn = ttk.Button(button_frame, text="关闭", command=log_window.destroy)
+        close_btn.pack(side=tk.RIGHT, padx=5)
+        
+        # 状态栏
+        status_var = tk.StringVar()
+        status_var.set("请设置查询条件并点击查询按钮")
+        status_bar = ttk.Label(log_window, textvariable=status_var, relief=tk.SUNKEN, anchor=tk.W)
+        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # 初始加载今天的日志
+        query_logs()
+        
+        # 设置窗口为模态
+        log_window.transient(self.root)
+        log_window.grab_set()
+        self.root.wait_window(log_window)
+    
+    def export_logs(self):
+        """导出日志"""
+        if not self.current_user:
+            messagebox.showerror("错误", "请先登录")
+            return
+            
+        # 创建导出窗口
+        export_window = tk.Toplevel(self.root)
+        export_window.title("导出操作日志")
+        export_window.geometry("400x300")
+        export_window.minsize(400, 300)
+        
+        # 设置窗口图标
+        try:
+            from src.utils.paths import get_icon_path
+            icon_path = get_icon_path()
+            if os.path.exists(icon_path):
+                export_window.iconbitmap(icon_path)
+        except Exception as e:
+            logging.warning(f"设置图标失败: {str(e)}")
+        
+        # 创建查询条件框架
+        query_frame = ttk.Frame(export_window, padding="10 10 10 10")
+        query_frame.pack(fill=tk.X)
+        
+        # 用户名筛选
+        ttk.Label(query_frame, text="用户名:").grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
+        username_var = tk.StringVar()
+        username_entry = ttk.Entry(query_frame, textvariable=username_var, width=15)
+        username_entry.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        # 操作类型筛选
+        ttk.Label(query_frame, text="操作类型:").grid(row=1, column=0, padx=5, pady=5, sticky=tk.W)
+        operation_type_var = tk.StringVar()
+        operation_types = ["", "login", "search", "view", "print"]
+        operation_type_combo = ttk.Combobox(query_frame, textvariable=operation_type_var, values=operation_types, width=15)
+        operation_type_combo.grid(row=1, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        # 日期范围筛选
+        ttk.Label(query_frame, text="开始日期:").grid(row=2, column=0, padx=5, pady=5, sticky=tk.W)
+        start_date_var = tk.StringVar()
+        start_date_entry = ttk.Entry(query_frame, textvariable=start_date_var, width=15)
+        start_date_entry.grid(row=2, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        ttk.Label(query_frame, text="结束日期:").grid(row=3, column=0, padx=5, pady=5, sticky=tk.W)
+        end_date_var = tk.StringVar()
+        end_date_entry = ttk.Entry(query_frame, textvariable=end_date_var, width=15)
+        end_date_entry.grid(row=3, column=1, padx=5, pady=5, sticky=tk.W)
+        
+        # 设置默认日期为本月第一天和今天
+        today = datetime.date.today()
+        first_day = today.replace(day=1).strftime("%Y-%m-%d")
+        today_str = today.strftime("%Y-%m-%d")
+        start_date_var.set(first_day)
+        end_date_var.set(today_str)
+        
+        # 按钮框架
+        button_frame = ttk.Frame(export_window, padding="10 5 10 10")
+        button_frame.pack(fill=tk.X, pady=10)
+        
+        # 导出按钮
+        def do_export():
+            username = username_var.get().strip()
+            operation_type = operation_type_var.get()
+            start_date = start_date_var.get().strip()
+            end_date = end_date_var.get().strip()
+            
+            # 选择保存路径
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel文件", "*.xlsx"), ("所有文件", "*.*")],
+                title="保存日志文件"
+            )
+            
+            if not file_path:
+                return
+                
+            try:
+                # 查询日志
+                logs = self.db.get_logs(
+                    username=username if username else None,
+                    operation_type=operation_type if operation_type else None,
+                    start_date=start_date if start_date else None,
+                    end_date=end_date if end_date else None,
+                    limit=10000  # 导出更多记录
+                )
+                
+                if not logs:
+                    messagebox.showinfo("提示", "没有符合条件的日志记录")
+                    return
+                    
+                # 创建DataFrame
+                columns = ['id', 'username', 'operation_type', 'target_id', 'target_name', 'details', 'operation_time', 'ip_address']
+                df = pd.DataFrame(logs, columns=columns)
+                
+                # 保存为Excel
+                df.to_excel(file_path, index=False)
+                messagebox.showinfo("成功", f"已导出 {len(logs)} 条日志记录到: {file_path}")
+                
+                # 记录导出日志的操作
+                self.db.add_log(
+                    username=self.current_user[1],  # 使用用户名而不是整个用户元组
+                    operation_type="export",
+                    details=f"导出日志记录: {len(logs)} 条",
+                    ip_address=self.local_ip
+                )
+                
+                export_window.destroy()
+                
+            except Exception as e:
+                logging.error(f"导出日志失败: {str(e)}")
+                messagebox.showerror("错误", f"导出失败: {str(e)}")
+        
+        export_btn = ttk.Button(button_frame, text="导出", command=do_export)
+        export_btn.pack(side=tk.LEFT, padx=5)
+        
+        # 取消按钮
+        cancel_btn = ttk.Button(button_frame, text="取消", command=export_window.destroy)
+        cancel_btn.pack(side=tk.RIGHT, padx=5)
+        
+        # 设置窗口为模态
+        export_window.transient(self.root)
+        export_window.grab_set()
+        self.root.wait_window(export_window)
 
     def load_files_from_db(self):
         """从数据库加载所有文件"""
@@ -1880,38 +2447,159 @@ class MainWindow:
     def check_registration(self):
         """检查是否已注册"""
         try:
-            # 检查配置目录下的注册文件是否存在
-            config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'config')
-            if not os.path.exists(config_dir):
-                os.makedirs(config_dir, exist_ok=True)
+            # 使用用户管理模块的注册验证逻辑
+            from src.ui.user_management import UserManager
+            if not hasattr(self, 'user_manager'):
+                self.user_manager = UserManager(self)
                 
-            registration_file = os.path.join(config_dir, 'registration.dat')
+            # 调用用户管理模块的检查注册方法
+            is_registered = self.user_manager.check_registration()
             
-            if os.path.exists(registration_file):
-                with open(registration_file, 'r', encoding='utf-8') as f:
-                    content = f.read().strip()
-                    # 简单加密处理
-                    decoded_content = ''.join([chr(ord(c) - 1) for c in content])
-                    parts = decoded_content.split('|')
-                    if len(parts) >= 2:
-                        reg_code = parts[0].strip()
-                        user_name = parts[1].strip()
-                        # 验证注册码和用户名
-                        if reg_code == "2xdqzr5zyghj" and user_name == "新都区自然资源规划局":
-                            logging.info(f"注册验证成功: {user_name}")
-                            return True
-        
-            # 如果没有找到有效的注册文件，返回False（未注册）
-            logging.info("系统未注册")
-            return False
+            if is_registered:
+                # 如果注册，尝试从注册文件中获取单位名称
+                config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'config')
+                registration_file = os.path.join(config_dir, 'registration.dat')
+                
+                if os.path.exists(registration_file):
+                    with open(registration_file, 'r', encoding='utf-8') as f:
+                        content = f.read().strip()
+                        # 简单解密处理
+                        decoded_content = ''.join([chr(ord(c) - 1) for c in content])
+                        parts = decoded_content.split('|')
+                        
+                        if len(parts) >= 2:
+                            self.current_org = parts[1].strip()
+                            logging.info(f"已注册单位: {self.current_org}")
+            else:
+                self.current_org = None
+                
+            return is_registered
+                
         except Exception as e:
             logging.error(f"检查注册状态失败: {str(e)}")
-            # 如果出错，返回False（默认未注册）
+            logging.debug(f"异常详情:", exc_info=True)
+            # 如果出错，清除单位名并返回False（默认未注册）
+            self.current_org = None
             return False
+    
+    def create_status_bar(self):
+        """创建状态栏"""
+        try:
+            # 创建状态栏框架
+            self.status_bar = ttk.Frame(self.root, height=20, relief=tk.SUNKEN)
+            self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+            
+            # 获取当前注册状态
+            is_registered = hasattr(self, 'is_registered') and self.is_registered
+            
+            # 左侧状态标签 - 用于显示注册状态
+            self.reg_status_var = tk.StringVar()
+            
+            # 根据注册状态设置初始文本和颜色
+            if is_registered:
+                status_text = f"已注册：{self.current_org}" if self.current_org else "已注册"
+                foreground_color = 'green'
+            else:
+                status_text = "未注册"
+                foreground_color = 'red'
+                
+            self.reg_status_var.set(status_text)
+            logging.info(f"状态栏初始化为: {status_text}")
+            
+            reg_status_label = ttk.Label(
+                self.status_bar, 
+                textvariable=self.reg_status_var, 
+                anchor=tk.W,
+                relief=tk.SUNKEN,
+                padding=(5, 0, 5, 0),
+                width=20,
+                foreground=foreground_color
+            )
+            reg_status_label.pack(side=tk.LEFT, padx=(0, 1))
+            
+            # 中间状态标签 - 用于显示一般状态信息
+            self.status_var = tk.StringVar()
+            self.status_var.set("就绪")
+            status_label = ttk.Label(
+                self.status_bar, 
+                textvariable=self.status_var, 
+                anchor=tk.W,
+                relief=tk.SUNKEN,
+                padding=(5, 0, 5, 0)
+            )
+            status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            
+            # 右侧版本信息标签
+            version_label = ttk.Label(
+                self.status_bar,
+                text=f"版本: {self.version}",
+                anchor=tk.E,
+                relief=tk.SUNKEN,
+                padding=(5, 0, 5, 0),
+                width=15
+            )
+            version_label.pack(side=tk.RIGHT)
+            
+            logging.info("状态栏创建成功")
+        except Exception as e:
+            logging.error(f"创建状态栏时出错: {str(e)}")
+            import traceback
+            logging.error(traceback.format_exc())
+    
+    def update_status_bar(self):
+        """更新状态栏中的注册状态"""
+        try:
+            if hasattr(self, 'reg_status_var'):
+                logging.debug(f"更新状态栏，当前注册状态: {'已注册' if self.is_registered else '未注册'}")
+                old_status = self.reg_status_var.get()
+                
+                if self.is_registered:
+                    status_text = f"已注册：{self.current_org}" if self.current_org else "已注册"
+                    self.reg_status_var.set(status_text)
+                    # 已注册状态显示为绿色
+                    for child in self.status_bar.winfo_children():
+                        if isinstance(child, ttk.Label) and child.cget('textvariable') == str(self.reg_status_var):
+                            child.configure(foreground='green')
+                    logging.info(f"更新状态栏: {status_text}")
+                else:
+                    self.reg_status_var.set("未注册")
+                    # 未注册状态显示为红色
+                    for child in self.status_bar.winfo_children():
+                        if isinstance(child, ttk.Label) and child.cget('textvariable') == str(self.reg_status_var):
+                            child.configure(foreground='red')
+                    logging.info("更新状态栏: 未注册")
+                
+                new_status = self.reg_status_var.get()
+                if old_status != new_status:
+                    logging.debug(f"状态栏显示已从 '{old_status}' 更改为 '{new_status}'")
+            else:
+                logging.warning("无法更新状态栏：状态变量不存在")
+        except Exception as e:
+            logging.error(f"更新状态栏时出错: {str(e)}")
+            import traceback
+            logging.error(traceback.format_exc())
     
     def update_ui_by_registration(self):
         """根据注册状态更新界面"""
         try:
+            logging.info(f"开始更新界面，注册状态: {'已注册' if self.is_registered else '未注册'}")
+            # 确保状态栏已创建
+            if not hasattr(self, 'status_bar'):
+                self.create_status_bar()
+            
+            # 更新状态栏显示
+            self.update_status_bar()
+            
+            # 不再根据注册状态禁用注册菜单项，始终保持可用
+            # if hasattr(self, 'help_menu'):
+            #     try:
+            #         # 直接设置注册菜单项状态
+            #         state = tk.DISABLED if self.is_registered else tk.NORMAL
+            #         self.help_menu.entryconfigure("用户注册", state=state)
+            #         logging.info(f"更新注册菜单项状态: {'禁用' if self.is_registered else '启用'}")
+            #     except Exception as e:
+            #         logging.error(f"更新注册菜单项状态失败: {str(e)}")
+            
             if not self.is_registered:
                 # 未注册状态：禁用大部分功能，保留帮助菜单和退出选项
                 # 禁用工具栏按钮
@@ -1919,6 +2607,8 @@ class MainWindow:
                     self.import_category_btn.config(state=tk.DISABLED)
                 if hasattr(self, 'import_file_btn'):
                     self.import_file_btn.config(state=tk.DISABLED)
+                if hasattr(self, 'search_button'):
+                    self.search_button.config(state=tk.DISABLED)
                 
                 # 禁用搜索框
                 for widget in self.root.winfo_children():
@@ -1950,6 +2640,14 @@ class MainWindow:
                         except:
                             pass
                 
+                # 禁用安全菜单
+                if hasattr(self, 'security_menu'):
+                    for i in range(self.security_menu.index('end') + 1):
+                        try:
+                            self.security_menu.entryconfigure(i, state=tk.DISABLED)
+                        except:
+                            pass
+                
                 # 确保用户注册菜单项可用（在帮助菜单中）
                 menubar = self.root.nametowidget(self.root['menu'])
                 for i in range(menubar.index('end') + 1):
@@ -1966,34 +2664,26 @@ class MainWindow:
                     except:
                         pass
                 
-                # 更新状态栏显示未注册信息
-                if hasattr(self, 'status_var'):
-                    self.status_var.set("未注册")
-                
                 logging.info("已设置为未注册状态界面")
             else:
-                # 已注册状态：启用所有功能，隐藏注册菜单项
+                # 已注册状态：启用所有功能
                 logging.info("已设置为已注册状态界面")
                 
-                # 隐藏用户注册菜单项
-                menubar = self.root.nametowidget(self.root['menu'])
-                for i in range(menubar.index('end') + 1):
-                    try:
-                        if menubar.entrycget(i, 'label') == '帮助':
-                            help_menu = menubar.nametowidget(menubar.entrycget(i, 'menu'))
-                            for j in range(help_menu.index('end') + 1):
-                                try:
-                                    if help_menu.entrycget(j, 'label') == '用户注册':
-                                        help_menu.entryconfigure(j, state=tk.DISABLED)
-                                except:
-                                    pass
-                            break
-                    except:
-                        pass
-                
-                # 更新状态栏显示已注册信息
-                if hasattr(self, 'status_var'):
-                    self.status_var.set("已注册：新都区自然资源规划局")
+                # 不再隐藏用户注册菜单项，始终保持可用
+                # menubar = self.root.nametowidget(self.root['menu'])
+                # for i in range(menubar.index('end') + 1):
+                #     try:
+                #         if menubar.entrycget(i, 'label') == '帮助':
+                #             help_menu = menubar.nametowidget(menubar.entrycget(i, 'menu'))
+                #             for j in range(help_menu.index('end') + 1):
+                #                 try:
+                #                     if help_menu.entrycget(j, 'label') == '用户注册':
+                #                         help_menu.entryconfigure(j, state=tk.DISABLED)
+                #                 except:
+                #                     pass
+                #             break
+                #     except:
+                #         pass
         
         except Exception as e:
             logging.error(f"更新界面失败: {str(e)}")
@@ -2001,38 +2691,44 @@ class MainWindow:
     def register_system(self, reg_code, user_name):
         """注册系统"""
         try:
-            # 验证注册码和用户名
-            if reg_code == "2xdqzr5zyghj" and user_name == "新都区自然资源规划局":
-                # 确保配置目录存在
-                config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'config')
-                if not os.path.exists(config_dir):
-                    os.makedirs(config_dir, exist_ok=True)
-                    
-                # 保存注册信息到加密文件
-                registration_file = os.path.join(config_dir, 'registration.dat')
+            # 使用用户管理模块的注册验证逻辑
+            from src.ui.user_management import UserManager
+            if not hasattr(self, 'user_manager'):
+                self.user_manager = UserManager(self)
                 
-                # 简单加密处理（每个字符ASCII码+1）
-                encoded_content = ''.join([chr(ord(c) + 1) for c in f"{reg_code}|{user_name}"])
-                
-                with open(registration_file, 'w', encoding='utf-8') as f:
-                    f.write(encoded_content)
-                
+            # 调用用户管理模块的注册方法
+            success, message = self.user_manager.register_system(reg_code, user_name)
+            
+            if success:
+                # 更新注册状态
                 self.is_registered = True
-                logging.info(f"系统注册成功: {user_name}")
+                self.current_org = user_name  # 保存当前单位名
+                logging.info(f"系统注册状态已更新: 已注册，单位: {self.current_org}")
                 
-                # 更新状态栏
-                if hasattr(self, 'status_var'):
-                    self.status_var.set(f"已注册：{user_name}")
+                # 强制更新状态栏
+                if hasattr(self, 'reg_status_var'):
+                    # 直接设置新状态，确保显示变化
+                    status_text = f"已注册：{user_name}"
+                    self.reg_status_var.set(status_text)
+                    
+                    # 设置颜色为绿色
+                    for child in self.status_bar.winfo_children():
+                        if isinstance(child, ttk.Label) and child.cget('textvariable') == str(self.reg_status_var):
+                            child.configure(foreground='green')
+                    
+                    logging.info(f"状态栏已更新为: {status_text}")
+                else:
+                    logging.warning("无法更新状态栏：状态变量不存在")
                 
                 # 更新界面
                 self.update_ui_by_registration()
                 
-                # 重启应用以应用注册
-                messagebox.showinfo("注册成功", "系统已成功注册！请重启应用程序以应用所有功能。")
+                # 最后显示成功消息
+                messagebox.showinfo("注册成功", message)
                 return True
             else:
-                logging.warning(f"注册失败: 无效的注册码或用户名")
-                messagebox.showerror("注册失败", "无效的注册码或用户名，请联系系统管理员。")
+                logging.warning(f"注册失败: {message}")
+                messagebox.showerror("注册失败", message)
                 return False
         except Exception as e:
             logging.error(f"注册系统失败: {str(e)}")
@@ -2108,51 +2804,52 @@ class MainWindow:
         
         reg_dialog.wait_window()
 
-    def create_status_bar(self):
-        """创建状态栏"""
-        # 创建状态栏框架
-        status_frame = ttk.Frame(self.root)
-        status_frame.pack(side=tk.BOTTOM, fill=tk.X)
-        
-        # 第一栏：注册状态和用户单位
-        self.status_var = tk.StringVar()
-        if hasattr(self, 'is_registered') and self.is_registered:
-            self.status_var.set("已注册：新都区自然资源规划局")
-        else:
-            self.status_var.set("未注册")
-            
-        status_label1 = ttk.Label(
-            status_frame, 
-            textvariable=self.status_var, 
-            relief=tk.SUNKEN, 
-            anchor=tk.W,
-            padding=(5, 2, 5, 2),
-            width=30
-        )
-        status_label1.pack(side=tk.LEFT, fill=tk.X, padx=(0, 1))
-        
-        # 第二栏：版本信息
-        version_text = f"版本: {self.version}"
-        status_label2 = ttk.Label(
-            status_frame, 
-            text=version_text,
-            relief=tk.SUNKEN, 
-            anchor=tk.W,
-            padding=(5, 2, 5, 2),
-            width=15
-        )
-        status_label2.pack(side=tk.LEFT, fill=tk.X, padx=(0, 1))
-        
-        # 第三栏：搜索结果/状态信息
+    # 状态栏相关方法已合并到上面的create_status_bar方法中
+
+    # 其他方法...
+    def some_other_method(self):
         if not hasattr(self, 'search_result_var'):
             self.search_result_var = tk.StringVar()
             self.search_result_var.set("就绪")
+
+    # 添加安全功能相关方法
+    def show_integrity_check(self):
+        """显示档案完整性检查对话框"""
+        try:
+            # 获取档案目录
+            archives_dir = None
+            if hasattr(self, 'db') and self.db:
+                # 从数据库或配置中获取档案目录
+                try:
+                    # 尝试从数据库获取
+                    query = "SELECT value FROM system_settings WHERE key = 'archives_dir'"
+                    result = self.db.execute_query(query)
+                    if result and result[0][0]:
+                        archives_dir = result[0][0]
+                except:
+                    # 如果出错，尝试从设置中获取
+                    if hasattr(self, 'import_root_dir') and self.import_root_dir:
+                        archives_dir = self.import_root_dir
             
-        status_label3 = ttk.Label(
-            status_frame, 
-            textvariable=self.search_result_var,
-            relief=tk.SUNKEN, 
-            anchor=tk.W,
-            padding=(5, 2, 5, 2)
-        )
-        status_label3.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            # 导入安全模块UI
+            try:
+                # 打包环境
+                if getattr(sys, 'frozen', False):
+                    from security.ui import IntegrityCheckDialog
+                else:
+                    # 开发环境
+                    from src.security.ui import IntegrityCheckDialog
+                
+                # 显示对话框
+                dialog = IntegrityCheckDialog(self.root, archives_dir=archives_dir)
+                
+                # 等待对话框关闭
+                self.root.wait_window(dialog)
+                
+            except ImportError as e:
+                logging.error(f"导入安全模块失败: {str(e)}")
+                messagebox.showerror("错误", f"无法加载安全模块: {str(e)}")
+        
+        except Exception as e:
+            logging.exception(f"显示档案完整性检查对话框时出错: {str(e)}")
+            messagebox.showerror("错误", f"打开档案完整性检查工具时出错: {str(e)}")

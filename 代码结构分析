@@ -1,0 +1,9 @@
+"""
+我们的安全模块代码结构清晰合理：
+1. src/security/__init__.py - 定义了模块入口和版本信息
+2. src/security/integrity.py - 实现了档案完整性检查的核心功能
+3. src/security/utils.py - 提供了文件哈希计算等通用工具函数
+4. src/security/ui.py - 实现了完整性检查的图形界面组件
+
+这种模块化设计使得代码易于维护和扩展，同时保持了与原有系统的良好集成。
+""" 

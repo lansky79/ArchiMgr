@@ -123,74 +123,63 @@ class FileOperationManager:
             logging.debug(f"文件样本: {sample_files}")
         
         try:
-            # 筛选只显示PDF文件
-            pdf_files = []
-            for file_name, file_path in files:
-                # 确保文件路径在'目录'子目录下
-                if '目录' not in file_path.replace('\\', '/'):
-                    continue
-                    
-                # 将文件名转为小写进行判断
-                if file_name.lower().endswith('.pdf'):
-                    pdf_files.append((file_name, file_path))
-                    
-            logging.debug(f"筛选后的PDF文件数量: {len(pdf_files)}")
-            
             # 插入新的文件记录
-            for file_name, file_path in pdf_files:
-                # 从文件路径中提取人名和文件夹名
-                dir_name = os.path.basename(os.path.dirname(os.path.dirname(file_path)))
-                
-                # 提取编号 - 获取文件夹名中的数字前缀
-                # 正则表达式提取开头的连续数字
-                match = re.match(r'^(\d+)(.*)', dir_name)
-                file_id = ""
-                person_name = dir_name
-                
-                if match:
-                    file_id = match.group(1)
-                    # 处理姓名，去掉数字部分只保留人名
-                    person_name = match.group(2).strip()
-                
-                # 文件名就是类号（例如 3-1.pdf 的类号就是 3-1）
-                class_code = os.path.splitext(file_name)[0]
-                
-                logging.debug(f"处理文件: {file_name}, 类号: {class_code}, 编号: {file_id}, 人名: {person_name}, 目录名: {dir_name}")
-                
-                # 从Excel获取文件信息（材料名称、日期、页数）
-                try:
-                    # dir_name = 文件夹名（如 123张三），需分解为编号和姓名
-                    match = re.match(r'^(\d+)(.+)$', dir_name)
+            for file_data in files:
+                # 处理不同的数据结构
+                if isinstance(file_data, tuple) and len(file_data) == 2:
+                    # 处理简单的(file_name, file_path)格式
+                    file_name, file_path = file_data
+                    
+                    # 从文件路径中提取人名和文件夹名
+                    dir_path = os.path.dirname(file_path)
+                    dir_name = os.path.basename(dir_path)
+                    
+                    # 提取编号 - 获取文件夹名中的数字前缀
+                    match = re.match(r'^(\d+)(.*)', dir_name)
+                    file_id = ""
+                    person_name = dir_name
+                    
                     if match:
                         file_id = match.group(1)
+                        # 处理姓名，去掉数字部分只保留人名
                         person_name = match.group(2).strip()
+                    
+                    # 文件名就是类号（例如 3-1.pdf 的类号就是 3-1）
+                    class_code = os.path.splitext(file_name)[0]
+                    
+                    # 从Excel获取文件信息（材料名称、日期、页数）
+                    try:
+                        material_name, file_date, page_count, _ = get_excel_info(self.import_root_dir, person_name, file_id, class_code)
+                    except ExcelFileNotFound:
+                        material_name, file_date, page_count = '', '', ''
+                    except Exception as e:
+                        logging.error(f"Excel信息读取失败: {str(e)}")
+                        material_name, file_date, page_count = '', '', ''
+                    
+                    # 插入到列表
+                    self.main_window.file_list.insert('', 'end', values=(
+                        file_id,
+                        person_name,
+                        class_code,
+                        material_name,
+                        file_name,
+                        file_date,
+                        page_count,
+                        file_path
+                    ))
+                else:
+                    # 处理完整的数据库记录
+                    # 假设是从数据库查询返回的结果，包含多个字段
+                    if len(file_data) >= 8:
+                        # 直接使用数据库返回的所有字段
+                        self.main_window.file_list.insert('', 'end', values=file_data)
                     else:
-                        file_id = ''
-                        person_name = dir_name
-                    material_name, file_date, page_count, data_list = get_excel_info(self.import_root_dir, person_name, file_id, class_code)
-                    # 处理 data_list
-                    if data_list:
-                        logging.debug(f"处理文件: {file_name}, 类号: {class_code}, 编号: {file_id}, 人名: {person_name}, 目录名: {dir_name}, 数据列表: {data_list}")
-                except ExcelFileNotFound as e:
-                    logging.warning(str(e))
-                    material_name, file_date, page_count = '', '', ''
-                    messagebox.showwarning("未找到Excel文件", str(e))
-                except Exception as e:
-                    logging.error(f"Excel信息读取失败: {str(e)}")
-                    material_name, file_date, page_count = '', '', ''
-                    messagebox.showerror("Excel读取错误", f"读取Excel信息时发生错误：{str(e)}")
-                
-                # 插入到列表
-                self.main_window.file_list.insert('', 'end', values=(
-                    file_id,
-                    person_name,
-                    class_code,
-                    material_name,
-                    file_name,
-                    file_date,
-                    page_count,
-                    file_path
-                ))
+                        # 处理字段不足的情况
+                        values = list(file_data)
+                        # 确保至少有8个字段
+                        while len(values) < 8:
+                            values.append("")
+                        self.main_window.file_list.insert('', 'end', values=values)
                 
         except Exception as e:
             logging.error(f"更新文件列表失败: {str(e)}")

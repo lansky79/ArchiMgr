@@ -388,7 +388,7 @@ class DialogManager:
         about_text = f"""
         档案检索系统
         
-        版本: {self.main_window.version}
+        版本: V1.0
         
         本系统用于管理和检索电子档案，提供简便的导入、搜索和查看功能。
         

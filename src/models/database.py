@@ -81,6 +81,21 @@ class Database:
                 )
             ''')
             
+            # 操作日志表
+            self.cursor.execute('''
+                CREATE TABLE IF NOT EXISTS operation_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL,      -- 操作用户
+                    operation_type TEXT NOT NULL, -- 操作类型: login, search, print, view
+                    target_id TEXT,              -- 目标ID（如档案编号）
+                    target_name TEXT,            -- 目标名称（如档案名称、人员姓名）
+                    details TEXT,                -- 操作详情
+                    operation_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- 操作时间
+                    ip_address TEXT,             -- IP地址
+                    FOREIGN KEY (username) REFERENCES users(username)
+                )
+            ''')
+            
             self.conn.commit()
             logging.info("数据库表创建成功")
         except Exception as e:
@@ -135,3 +150,70 @@ class Database:
             self.conn.rollback()
             logging.error(f"数据库迁移失败: {str(e)}")
             # 不抛出异常，允许程序继续运行
+    
+    def add_log(self, username, operation_type, target_id=None, target_name=None, details=None, ip_address=None):
+        """添加操作日志
+        
+        参数:
+            username (str): 操作用户名
+            operation_type (str): 操作类型 (login, search, print, view)
+            target_id (str, optional): 目标ID，如档案编号
+            target_name (str, optional): 目标名称，如档案名称、人员姓名
+            details (str, optional): 操作详情
+            ip_address (str, optional): IP地址
+        """
+        try:
+            self.cursor.execute('''
+                INSERT INTO operation_logs 
+                (username, operation_type, target_id, target_name, details, ip_address)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (username, operation_type, target_id, target_name, details, ip_address))
+            self.conn.commit()
+            logging.info(f"记录操作日志: 用户={username}, 操作={operation_type}, 目标={target_name}")
+            return True
+        except Exception as e:
+            self.conn.rollback()
+            logging.error(f"记录操作日志失败: {str(e)}")
+            return False
+    
+    def get_logs(self, username=None, operation_type=None, start_date=None, end_date=None, limit=1000):
+        """获取操作日志
+        
+        参数:
+            username (str, optional): 按用户名筛选
+            operation_type (str, optional): 按操作类型筛选
+            start_date (str, optional): 开始日期，格式 YYYY-MM-DD
+            end_date (str, optional): 结束日期，格式 YYYY-MM-DD
+            limit (int, optional): 限制返回记录数，默认1000条
+            
+        返回:
+            list: 日志记录列表
+        """
+        query = "SELECT * FROM operation_logs WHERE 1=1"
+        params = []
+        
+        if username:
+            query += " AND username = ?"
+            params.append(username)
+        
+        if operation_type:
+            query += " AND operation_type = ?"
+            params.append(operation_type)
+        
+        if start_date:
+            query += " AND date(operation_time) >= ?"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND date(operation_time) <= ?"
+            params.append(end_date)
+        
+        query += " ORDER BY operation_time DESC LIMIT ?"
+        params.append(limit)
+        
+        try:
+            self.cursor.execute(query, params)
+            return self.cursor.fetchall()
+        except Exception as e:
+            logging.error(f"获取操作日志失败: {str(e)}")
+            return []

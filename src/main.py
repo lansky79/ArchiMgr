@@ -29,13 +29,13 @@ BASE_PATH = setup_paths()
 # 导入路径管理模块
 try:
     # 统一导入方式，让 Python 在 sys.path 中查找模块
-    from utils.paths import (
+    from src.utils.paths import (
         get_application_path, get_user_data_dir, get_resources_path, 
         get_icon_path, get_exports_dir, get_temp_dir
     )
-    from models.database import Database
-    from ui.main_window import MainWindow
-    from config.logger import setup_logger
+    from src.models.database import Database
+    from src.ui.main_window import MainWindow
+    from src.config.logger import setup_logger
 except ImportError as e:
     print(f"导入错误: {e}")
     print(f"当前路径: {os.getcwd()}")
@@ -61,7 +61,7 @@ except Exception as e:
     logging.error(f"预加载模块失败: {str(e)}")
 
 # 应用程序常量
-VERSION = "1.0(0522)"
+VERSION = "V1.0"
 
 def setup_logging():
     """配置日志记录，同时输出到控制台和文件"""
@@ -251,6 +251,21 @@ def main():
             cleanup()
         logging.info("程序正常退出")
         return 0  # 返回0表示成功
+
+def register_system(reg_code, user_name):
+    """注册系统"""
+    # 验证注册信息
+    if is_valid_license(reg_code, user_name):
+        # 创建加密的许可证文件
+        return True, "注册成功"
+    return False, "注册失败"
+
+# 分析注册信息存储机制
+"""
+1. 分析当前系统中存储注册信息的多个位置
+2. 评估这种设计是否存在冗余
+3. 提供更合理的设计建议
+"""
 
 if __name__ == "__main__":
     main()

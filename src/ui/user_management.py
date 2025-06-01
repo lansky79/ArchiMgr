@@ -123,16 +123,24 @@ class UserManager:
             if os.path.exists(registration_file):
                 with open(registration_file, 'r', encoding='utf-8') as f:
                     content = f.read().strip()
-                    # 简单加密处理
+                    # 简单解密处理
                     decoded_content = ''.join([chr(ord(c) - 1) for c in content])
                     parts = decoded_content.split('|')
+                    
                     if len(parts) >= 2:
-                        reg_code = parts[0].strip()
-                        user_name = parts[1].strip()
-                        # 验证注册码和用户名
-                        if reg_code == "2xdqzr5zyghj" and user_name == "新都区自然资源规划局":
-                            logging.info(f"注册验证成功: {user_name}")
-                            return True
+                        # 检查是否已注册
+                        valid_reg_file = os.path.join(config_dir, 'valid_registration.dat')
+                        if os.path.exists(valid_reg_file):
+                            with open(valid_reg_file, 'r', encoding='utf-8') as vf:
+                                valid_content = vf.read().strip()
+                                # 解密有效注册信息
+                                valid_decoded = ''.join([chr(ord(c) - 1) for c in valid_content])
+                                
+                                # 比对注册信息
+                                if decoded_content == valid_decoded:
+                                    reg_name = parts[1].strip()
+                                    logging.info(f"注册验证成功: {reg_name}")
+                                    return True
         
             # 如果没有找到有效的注册文件，返回False（未注册）
             logging.info("系统未注册")
@@ -145,14 +153,34 @@ class UserManager:
     def register_system(self, reg_code, user_name):
         """注册系统"""
         try:
-            # 验证注册码
-            if reg_code != "2xdqzr5zyghj" or user_name != "新都区自然资源规划局":
-                return False, "注册码或单位名称错误"
-                
-            # 保存注册信息
+            # 配置目录
             config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'config')
             os.makedirs(config_dir, exist_ok=True)
             
+            # 验证注册码与预设的有效注册信息
+            valid_reg_file = os.path.join(config_dir, 'valid_registration.dat')
+            
+            if not os.path.exists(valid_reg_file):
+                return False, "系统未配置有效注册信息"
+            
+            # 读取有效注册信息
+            with open(valid_reg_file, 'r', encoding='utf-8') as vf:
+                valid_content = vf.read().strip()
+                # 解密有效注册信息
+                valid_decoded = ''.join([chr(ord(c) - 1) for c in valid_content])
+                valid_parts = valid_decoded.split('|')
+                
+                if len(valid_parts) < 2:
+                    return False, "系统注册信息格式错误"
+                
+                valid_code = valid_parts[0].strip()
+                valid_name = valid_parts[1].strip()
+                
+                # 验证输入的注册码和单位名称
+                if reg_code != valid_code or user_name != valid_name:
+                    return False, "注册码或单位名称错误"
+            
+            # 注册信息验证通过，保存到registration.dat
             registration_file = os.path.join(config_dir, 'registration.dat')
             
             # 简单加密处理

@@ -1,0 +1,301 @@
+{
+  "created_time": "2025-06-01 21:42:56",
+  "archives_dir": "C:/ly/sourcestride/档案数字化/新都区干部人事档案new/新都区干部人事档案",
+  "file_count": 42,
+  "files": {
+    "pdf图片\\02870101张三\\1-1.pdf": {
+      "hash": "25e7b658731c690b966e2a9107095774d3d182f3b60af5d64e3f4fbc9b2b78e3",
+      "size": 2302662,
+      "modified_time": "2025-05-08 23:49:46",
+      "created_time": "2025-05-08 23:49:46",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870101张三\\1-2.pdf": {
+      "hash": "393c8a6e295e0d4ead8460ba367d1421ccba8147060612271924beab3c74c498",
+      "size": 13288891,
+      "modified_time": "2025-05-08 23:51:24",
+      "created_time": "2025-05-08 23:51:24",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870101张三\\1-3.pdf": {
+      "hash": "f273e7eb19e5e269def91098aa8f66895f6488193ae80f4e2ea7a8090e5e3e2b",
+      "size": 14447678,
+      "modified_time": "2025-05-08 23:52:24",
+      "created_time": "2025-05-08 23:52:24",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870101张三\\10-1.pdf": {
+      "hash": "ae5452c980e10bd0dd18049908297940dd0f8c7fbcf17e293c4bed127fc7662e",
+      "size": 1656032,
+      "modified_time": "2025-05-09 00:01:12",
+      "created_time": "2025-05-09 00:01:12",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870101张三\\2-1.pdf": {
+      "hash": "90922e5e1f2c522a956120d9f0fd97b892c8c16ac64003b565fd4ab4a08d89fb",
+      "size": 5264191,
+      "modified_time": "2025-05-08 23:53:42",
+      "created_time": "2025-05-08 23:53:42",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870101张三\\3-1.pdf": {
+      "hash": "1a1bb85201924da591a2a7eb53ab299332fbdf8f74a3582b86510f235041046b",
+      "size": 5489338,
+      "modified_time": "2025-05-08 23:54:10",
+      "created_time": "2025-05-08 23:54:10",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870101张三\\4-1-1.pdf": {
+      "hash": "6111f0f0495ed94458f4fc79c3fd4aecd52b0db745661e1e4b38d20858b7dbcd",
+      "size": 2905055,
+      "modified_time": "2025-05-08 23:54:56",
+      "created_time": "2025-05-08 23:54:56",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870101张三\\4-2-1.pdf": {
+      "hash": "1e830a07c65168b710968179ca98a0667aff7747ed5e5e4ff386098cf0a48ecc",
+      "size": 4147346,
+      "modified_time": "2025-05-08 23:59:02",
+      "created_time": "2025-05-08 23:59:02",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870101张三\\5-1.pdf": {
+      "hash": "7b2f476838cca6f1cbc97cc50abd3d36d11ef75c1d34fbd012db6f2336adef96",
+      "size": 1724621,
+      "modified_time": "2025-05-08 23:55:38",
+      "created_time": "2025-05-08 23:55:38",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870101张三\\6-1.pdf": {
+      "hash": "67a92b67a99197655832fabc857108e9ea46bd4d90b51802eb73a4561876e194",
+      "size": 10648434,
+      "modified_time": "2025-05-08 23:57:22",
+      "created_time": "2025-05-08 23:57:22",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870101张三\\7-1.pdf": {
+      "hash": "081fa122ccce9128e5cc9a7dc8f2c23b89354aa72c900c315f488d8d3de7675c",
+      "size": 788851,
+      "modified_time": "2025-05-08 23:57:46",
+      "created_time": "2025-05-08 23:57:46",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870101张三\\9-1-1.pdf": {
+      "hash": "8b70ae3769b1194b65eac5a73dc96ce28217f2c3ea1d854043e4486951c5313c",
+      "size": 620816,
+      "modified_time": "2025-05-08 23:58:18",
+      "created_time": "2025-05-08 23:58:18",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870101张三\\9-2-1.pdf": {
+      "hash": "d4da56bf0960d6a6be09092ff716a16ea6e17aad9dc9347b174aa7bc58d284e5",
+      "size": 2370138,
+      "modified_time": "2025-05-08 23:59:52",
+      "created_time": "2025-05-08 23:59:52",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870102李四\\1-1.pdf": {
+      "hash": "25e7b658731c690b966e2a9107095774d3d182f3b60af5d64e3f4fbc9b2b78e3",
+      "size": 2302662,
+      "modified_time": "2025-05-08 23:49:46",
+      "created_time": "2025-05-08 23:49:46",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870102李四\\1-2.pdf": {
+      "hash": "393c8a6e295e0d4ead8460ba367d1421ccba8147060612271924beab3c74c498",
+      "size": 13288891,
+      "modified_time": "2025-05-08 23:51:24",
+      "created_time": "2025-05-08 23:51:24",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870102李四\\1-3.pdf": {
+      "hash": "f273e7eb19e5e269def91098aa8f66895f6488193ae80f4e2ea7a8090e5e3e2b",
+      "size": 14447678,
+      "modified_time": "2025-05-08 23:52:24",
+      "created_time": "2025-05-08 23:52:24",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870102李四\\10-1.pdf": {
+      "hash": "ae5452c980e10bd0dd18049908297940dd0f8c7fbcf17e293c4bed127fc7662e",
+      "size": 1656032,
+      "modified_time": "2025-05-09 00:01:12",
+      "created_time": "2025-05-09 00:01:12",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870102李四\\2-1.pdf": {
+      "hash": "90922e5e1f2c522a956120d9f0fd97b892c8c16ac64003b565fd4ab4a08d89fb",
+      "size": 5264191,
+      "modified_time": "2025-05-08 23:53:42",
+      "created_time": "2025-05-08 23:53:42",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870102李四\\3-1.pdf": {
+      "hash": "1a1bb85201924da591a2a7eb53ab299332fbdf8f74a3582b86510f235041046b",
+      "size": 5489338,
+      "modified_time": "2025-05-08 23:54:10",
+      "created_time": "2025-05-08 23:54:10",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870102李四\\4-1-1.pdf": {
+      "hash": "6111f0f0495ed94458f4fc79c3fd4aecd52b0db745661e1e4b38d20858b7dbcd",
+      "size": 2905055,
+      "modified_time": "2025-05-08 23:54:56",
+      "created_time": "2025-05-08 23:54:56",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870102李四\\4-2-1.pdf": {
+      "hash": "1e830a07c65168b710968179ca98a0667aff7747ed5e5e4ff386098cf0a48ecc",
+      "size": 4147346,
+      "modified_time": "2025-05-08 23:59:02",
+      "created_time": "2025-05-08 23:59:02",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870102李四\\5-1.pdf": {
+      "hash": "7b2f476838cca6f1cbc97cc50abd3d36d11ef75c1d34fbd012db6f2336adef96",
+      "size": 1724621,
+      "modified_time": "2025-05-08 23:55:38",
+      "created_time": "2025-05-08 23:55:38",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870102李四\\6-1.pdf": {
+      "hash": "67a92b67a99197655832fabc857108e9ea46bd4d90b51802eb73a4561876e194",
+      "size": 10648434,
+      "modified_time": "2025-05-08 23:57:22",
+      "created_time": "2025-05-08 23:57:22",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870102李四\\7-1.pdf": {
+      "hash": "081fa122ccce9128e5cc9a7dc8f2c23b89354aa72c900c315f488d8d3de7675c",
+      "size": 788851,
+      "modified_time": "2025-05-08 23:57:46",
+      "created_time": "2025-05-08 23:57:46",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870102李四\\9-1-1.pdf": {
+      "hash": "8b70ae3769b1194b65eac5a73dc96ce28217f2c3ea1d854043e4486951c5313c",
+      "size": 620816,
+      "modified_time": "2025-05-08 23:58:18",
+      "created_time": "2025-05-08 23:58:18",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870102李四\\9-2-1.pdf": {
+      "hash": "d4da56bf0960d6a6be09092ff716a16ea6e17aad9dc9347b174aa7bc58d284e5",
+      "size": 2370138,
+      "modified_time": "2025-05-08 23:59:52",
+      "created_time": "2025-05-08 23:59:52",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870103王武\\1-1.pdf": {
+      "hash": "25e7b658731c690b966e2a9107095774d3d182f3b60af5d64e3f4fbc9b2b78e3",
+      "size": 2302662,
+      "modified_time": "2025-05-08 23:49:46",
+      "created_time": "2025-05-08 23:49:46",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870103王武\\1-2.pdf": {
+      "hash": "393c8a6e295e0d4ead8460ba367d1421ccba8147060612271924beab3c74c498",
+      "size": 13288891,
+      "modified_time": "2025-05-08 23:51:24",
+      "created_time": "2025-05-08 23:51:24",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870103王武\\1-3.pdf": {
+      "hash": "f273e7eb19e5e269def91098aa8f66895f6488193ae80f4e2ea7a8090e5e3e2b",
+      "size": 14447678,
+      "modified_time": "2025-05-08 23:52:24",
+      "created_time": "2025-05-08 23:52:24",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870103王武\\10-1.pdf": {
+      "hash": "ae5452c980e10bd0dd18049908297940dd0f8c7fbcf17e293c4bed127fc7662e",
+      "size": 1656032,
+      "modified_time": "2025-05-09 00:01:12",
+      "created_time": "2025-05-09 00:01:12",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870103王武\\2-1.pdf": {
+      "hash": "90922e5e1f2c522a956120d9f0fd97b892c8c16ac64003b565fd4ab4a08d89fb",
+      "size": 5264191,
+      "modified_time": "2025-05-08 23:53:42",
+      "created_time": "2025-05-08 23:53:42",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870103王武\\3-1.pdf": {
+      "hash": "1a1bb85201924da591a2a7eb53ab299332fbdf8f74a3582b86510f235041046b",
+      "size": 5489338,
+      "modified_time": "2025-05-08 23:54:10",
+      "created_time": "2025-05-08 23:54:10",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870103王武\\4-1-1.pdf": {
+      "hash": "6111f0f0495ed94458f4fc79c3fd4aecd52b0db745661e1e4b38d20858b7dbcd",
+      "size": 2905055,
+      "modified_time": "2025-05-08 23:54:56",
+      "created_time": "2025-05-08 23:54:56",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870103王武\\4-2-1.pdf": {
+      "hash": "1e830a07c65168b710968179ca98a0667aff7747ed5e5e4ff386098cf0a48ecc",
+      "size": 4147346,
+      "modified_time": "2025-05-08 23:59:02",
+      "created_time": "2025-05-08 23:59:02",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870103王武\\5-1.pdf": {
+      "hash": "7b2f476838cca6f1cbc97cc50abd3d36d11ef75c1d34fbd012db6f2336adef96",
+      "size": 1724621,
+      "modified_time": "2025-05-08 23:55:38",
+      "created_time": "2025-05-08 23:55:38",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870103王武\\6-1.pdf": {
+      "hash": "67a92b67a99197655832fabc857108e9ea46bd4d90b51802eb73a4561876e194",
+      "size": 10648434,
+      "modified_time": "2025-05-08 23:57:22",
+      "created_time": "2025-05-08 23:57:22",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870103王武\\7-1.pdf": {
+      "hash": "081fa122ccce9128e5cc9a7dc8f2c23b89354aa72c900c315f488d8d3de7675c",
+      "size": 788851,
+      "modified_time": "2025-05-08 23:57:46",
+      "created_time": "2025-05-08 23:57:46",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870103王武\\9-1-1.pdf": {
+      "hash": "8b70ae3769b1194b65eac5a73dc96ce28217f2c3ea1d854043e4486951c5313c",
+      "size": 620816,
+      "modified_time": "2025-05-08 23:58:18",
+      "created_time": "2025-05-08 23:58:18",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "pdf图片\\02870103王武\\9-2-1.pdf": {
+      "hash": "d4da56bf0960d6a6be09092ff716a16ea6e17aad9dc9347b174aa7bc58d284e5",
+      "size": 2370138,
+      "modified_time": "2025-05-08 23:59:52",
+      "created_time": "2025-05-08 23:59:52",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "目录\\02870101张三.xlsx": {
+      "hash": "03bd76c56610e59aa1a9109b737154600749cb980437812a1087784eba5807c2",
+      "size": 36877,
+      "modified_time": "2025-05-22 12:13:54",
+      "created_time": "2025-04-23 18:50:12",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "目录\\02870102李四.xlsx": {
+      "hash": "681999fc08f033275549dab40b24210f534bc246e9c2387231112d86eb54ba84",
+      "size": 36745,
+      "modified_time": "2025-05-22 12:18:10",
+      "created_time": "2025-04-23 18:50:12",
+      "checked_time": "2025-06-01 21:42:56"
+    },
+    "目录\\02870103王武.xlsx": {
+      "hash": "c7ffb843e476c6c10a513a4bdf21e0e7349f9d9001c6b75ecac11a13c586cbe8",
+      "size": 36698,
+      "modified_time": "2025-04-23 18:50:12",
+      "created_time": "2025-04-23 18:50:12",
+      "checked_time": "2025-06-01 21:42:56"
+    }
+  }
+}
