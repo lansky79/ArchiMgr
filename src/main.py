@@ -60,6 +60,30 @@ except Exception as e:
     print(f"预加载模块失败: {str(e)}")
     logging.error(f"预加载模块失败: {str(e)}")
 
+# 修改：添加类号前缀匹配函数，用于替换直接的类号比较
+def match_category_code(row_category_code, selected_category_id):
+    """
+    检查行的类号是否匹配选定的类别
+    
+    Args:
+        row_category_code: Excel行中的类号（如"1-1"、"4-1-1"）
+        selected_category_id: 用户选择的类别ID（如1、4、9）
+        
+    Returns:
+        是否匹配
+    """
+    if not row_category_code:
+        return False
+    
+    # 转换为字符串并去除空格
+    row_category_code = str(row_category_code).strip()
+    selected_category_id = str(selected_category_id).strip()
+    
+    # 检查类号是否以类别ID加连字符开头，或者完全相等
+    # 例如，类别ID为1时，匹配"1-1"、"1-2"等，或者就是"1"
+    # 类别ID为4时，匹配"4-1-1"、"4-2-1"等，或者就是"4"
+    return row_category_code.startswith(f"{selected_category_id}-") or row_category_code == selected_category_id
+
 # 应用程序常量
 VERSION = "V1.0"
 

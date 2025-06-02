@@ -44,12 +44,18 @@ def get_excel_info(import_root_dir, person_name, person_id, class_code):
     logging.info(f"- 根目录: {os.path.abspath(import_root_dir)}")
     logging.info(f"- 搜索条件: 姓名='{person_name}', 编号='{person_id}', 类号='{class_code}'")
 
-    # 解析sheet名
+    # 解析sheet名 - 保留完整类号格式进行记录
+    original_class_code = class_code
     class_parts = class_code.split('-')
     main_code = class_parts[0]
     sheet_code = main_code
     if main_code in ['4', '9'] and len(class_parts) >= 2:
         sheet_code = f"{main_code}-{class_parts[1]}"
+    
+    # 添加详细日志
+    logging.info(f"解析类号 '{class_code}' 为sheet代码 '{sheet_code}'，原始类号 '{original_class_code}'")
+    
+    # 映射表 - 将阿拉伯数字映射到中文数字和Excel工作表名称
     sheet_map = {
         '1': '一', '2': '二', '3': '三',
         '4-1': '四-1', '4-2': '四-2', '4-3': '四-3', '4-4': '四-4',
@@ -57,8 +63,18 @@ def get_excel_info(import_root_dir, person_name, person_id, class_code):
         '9-1': '九-1', '9-2': '九-2', '9-3': '九-3', '9-4': '九-4',
         '10': '十'
     }
+    
+    # 获取对应的工作表名称
     sheet_name = sheet_map.get(sheet_code)
+    logging.info(f"映射sheet代码 '{sheet_code}' 到工作表名称 '{sheet_name}'")
+    
+    # 如果找不到对应的工作表名称，尝试使用一级类号
+    if not sheet_name and len(class_parts) >= 2:
+        sheet_name = sheet_map.get(main_code)
+        logging.info(f"尝试使用一级类号 '{main_code}' 映射到工作表名称 '{sheet_name}'")
+    
     if not sheet_name:
+        logging.warning(f"无法将类号 '{class_code}' 映射到工作表名称，sheet_code='{sheet_code}'")
         return material_name, file_date, page_count, data_list
 
     # 只搜索'目录'子目录
@@ -81,7 +97,8 @@ def get_excel_info(import_root_dir, person_name, person_id, class_code):
         logging.info(f"找到匹配的Excel文件: {abs_path}")
         logging.info(f"正在读取工作表: {sheet_name}")
         try:
-            material_name, file_date, page_count, data_list = read_excel_file(file_path, sheet_name, class_code)
+            # 传递原始完整类号
+            material_name, file_date, page_count, data_list = read_excel_file(file_path, sheet_name, original_class_code)
             logging.info(f"成功读取Excel文件: {os.path.basename(file_path)}, 工作表: {sheet_name}")
             return material_name, file_date, page_count, data_list
         except Exception as e:
@@ -228,17 +245,98 @@ def read_excel_file(file_path, sheet_name, class_code=None, file_index=None):
         elif class_code and data_list:
             # 移除class_code中的文件扩展名（如果有）
             class_code_base = class_code.split('.')[0]
+            logging.info(f"在Excel数据中查找类号: '{class_code_base}'")
+            
+            # 记录所有Excel中的类号，便于调试
+            excel_class_codes = [item[0] for item in data_list if item[0]]
+            logging.info(f"Excel中所有类号: {excel_class_codes}")
             
             # 在数据列表中查找匹配的类号
+            found = False
+            
+            # 首先尝试完全匹配 - 优先使用完整类号
             for item in data_list:
-                if item[0] == class_code_base:  # item[0]是类号
+                excel_class_code = item[0]  # Excel中的类号
+                
+                # 跳过空类号
+                if not excel_class_code:
+                    continue
+                    
+                # 记录当前比较的类号
+                logging.info(f"比较类号: 文件='{class_code_base}' vs Excel='{excel_class_code}'")
+                
+                # 完全匹配
+                if excel_class_code == class_code_base:
                     material_name = item[1]  # 材料名称
                     file_date = item[2]      # 日期
                     page_count = item[3]     # 页数
-                    logging.info(f"找到匹配的类号 '{class_code_base}': 材料名称='{material_name}', 日期='{file_date}', 页数='{page_count}'")
+                    logging.info(f"找到完全匹配的类号 '{class_code_base}': 材料名称='{material_name}', 日期='{file_date}', 页数='{page_count}'")
+                    found = True
                     break
-            else:
+            
+            # 如果没有找到完全匹配，尝试其他匹配方式
+            if not found:
+                for item in data_list:
+                    excel_class_code = item[0]  # Excel中的类号
+                    
+                    # 跳过空类号
+                    if not excel_class_code:
+                        continue
+                    
+                    # 处理第四大类和第九大类的特殊情况（三级类号）
+                    # 例如文件名是9-2-1.pdf，Excel中记录的类号是9-2
+                    if len(class_code_base.split('-')) >= 3:
+                        # 提取前两级类号（如9-2-1变为9-2）
+                        parts = class_code_base.split('-')
+                        two_level_code = f"{parts[0]}-{parts[1]}"
+                        
+                        logging.info(f"尝试二级类号匹配: 文件三级类号='{class_code_base}' -> 二级类号='{two_level_code}' vs Excel='{excel_class_code}'")
+                        
+                        if excel_class_code == two_level_code:
+                            material_name = item[1]  # 材料名称
+                            file_date = item[2]      # 日期
+                            page_count = item[3]     # 页数
+                            logging.info(f"找到二级类号匹配 '{two_level_code}' (对应三级类号 '{class_code_base}'): 材料名称='{material_name}', 日期='{file_date}', 页数='{page_count}'")
+                            found = True
+                            break
+                    
+                    # 处理二级类号情况（如1-1）
+                    # 例如文件名是1-1.pdf，Excel中可能只有1
+                    elif len(class_code_base.split('-')) == 2:
+                        # 提取一级类号（如1-1变为1）
+                        main_code = class_code_base.split('-')[0]
+                        
+                        logging.info(f"尝试一级类号匹配: 文件二级类号='{class_code_base}' -> 一级类号='{main_code}' vs Excel='{excel_class_code}'")
+                        
+                        if excel_class_code == main_code:
+                            material_name = item[1]  # 材料名称
+                            file_date = item[2]      # 日期
+                            page_count = item[3]     # 页数
+                            logging.info(f"找到一级类号匹配 '{main_code}' (对应二级类号 '{class_code_base}'): 材料名称='{material_name}', 日期='{file_date}', 页数='{page_count}'")
+                            found = True
+                            break
+                    
+                    # 添加前缀匹配逻辑 - 如果Excel类号以class_code_base加连字符开头
+                    # 例如：class_code_base="1"，Excel类号="1-1"、"1-2"等
+                    elif excel_class_code.startswith(f"{class_code_base}-") or excel_class_code == class_code_base:
+                        material_name = item[1]  # 材料名称
+                        file_date = item[2]      # 日期
+                        page_count = item[3]     # 页数
+                        logging.info(f"找到匹配的类号 '{excel_class_code}' (对应类号 '{class_code_base}'): 材料名称='{material_name}', 日期='{file_date}', 页数='{page_count}'")
+                        found = True
+                        break
+            
+            if not found:
                 logging.warning(f"未找到匹配的类号: {class_code_base}")
+                
+                # 对于第四大类和第九大类，如果未找到匹配，尝试使用第一行数据
+                main_code = class_code_base.split('-')[0]
+                if main_code in ['4', '9'] and data_list:
+                    logging.info(f"第{main_code}类未找到匹配，使用第一行数据")
+                    material_name = data_list[0][1]  # 材料名称
+                    file_date = data_list[0][2]      # 日期
+                    page_count = data_list[0][3]     # 页数
+                    logging.info(f"使用第一行数据: 材料名称='{material_name}', 日期='{file_date}', 页数='{page_count}'")
             
             return material_name, file_date, page_count, data_list
         

@@ -29,6 +29,14 @@ class Database:
             logging.error(f"数据库连接失败: {str(e)}", exc_info=True)
             raise
     
+    def get_connection(self):
+        """获取数据库连接对象
+        
+        返回:
+            sqlite3.Connection: 数据库连接对象
+        """
+        return self.conn
+    
     def _create_tables(self):
         """创建数据库表"""
         try:

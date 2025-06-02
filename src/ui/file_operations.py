@@ -110,25 +110,47 @@ class FileOperationManager:
     
     def update_file_list(self, files):
         """更新文件列表"""
-        # 清空现有列表
+        # 清空文件列表
         self.main_window.file_list.delete(*self.main_window.file_list.get_children())
         
-        # 更新状态栏显示文件数量
-        if hasattr(self.main_window, 'search_result_var'):
-            self.main_window.search_result_var.set(f"搜索结果: {len(files)} 个文件")
+        # 如果没有文件，则显示提示
+        if not files or len(files) == 0:
+            self.main_window.status_bar.show_message("未找到匹配的文件", "info")
+            return
         
-        logging.debug(f"要更新的文件列表数量: {len(files)}")
-        if files:
-            sample_files = files[:3]
-            logging.debug(f"文件样本: {sample_files}")
-        
-        try:
-            # 插入新的文件记录
-            for file_data in files:
-                # 处理不同的数据结构
-                if isinstance(file_data, tuple) and len(file_data) == 2:
+        # 更新文件列表
+        for file in files:
+            try:
+                # 处理不同格式的文件数据
+                if len(file) >= 7:
+                    # 完整的person_files记录
+                    file_id = file[6] if file[6] else ""  # file_id
+                    person_name = file[1] if file[1] else ""  # person_name
+                    file_name = file[2] if file[2] else ""  # file_name
+                    file_path = file[3] if file[3] else ""  # file_path
+                    
+                    # 使用完整类号格式
+                    class_code = file[4] if file[4] else ""  # category_id
+                    
+                    # 确保使用完整类号格式 - 如果class_code为空，尝试从文件名提取
+                    if not class_code:
+                        # 从文件名中提取完整类号
+                        class_code = os.path.splitext(file_name)[0]
+                    
+                    # 从Excel获取文件信息（材料名称、日期、页数）
+                    try:
+                        material_name, file_date, page_count, _ = get_excel_info(self.import_root_dir, person_name, file_id, class_code)
+                        logging.info(f"获取Excel信息成功: 类号='{class_code}', 材料名称='{material_name}', 日期='{file_date}', 页数='{page_count}'")
+                    except ExcelFileNotFound:
+                        logging.warning(f"未找到Excel文件: 人名='{person_name}', 编号='{file_id}', 类号='{class_code}'")
+                        material_name, file_date, page_count = '', '', ''
+                    except Exception as e:
+                        logging.error(f"Excel信息读取失败: {str(e)}, 类号='{class_code}'")
+                        material_name, file_date, page_count = '', '', ''
+                    
+                else:
                     # 处理简单的(file_name, file_path)格式
-                    file_name, file_path = file_data
+                    file_name, file_path = file
                     
                     # 从文件路径中提取人名和文件夹名
                     dir_path = os.path.dirname(file_path)
@@ -144,46 +166,41 @@ class FileOperationManager:
                         # 处理姓名，去掉数字部分只保留人名
                         person_name = match.group(2).strip()
                     
-                    # 文件名就是类号（例如 3-1.pdf 的类号就是 3-1）
+                    # 文件名就是类号（例如 3-1.pdf 的类号就是 3-1）- 保留完整格式
                     class_code = os.path.splitext(file_name)[0]
                     
                     # 从Excel获取文件信息（材料名称、日期、页数）
                     try:
                         material_name, file_date, page_count, _ = get_excel_info(self.import_root_dir, person_name, file_id, class_code)
+                        logging.info(f"获取Excel信息成功: 类号='{class_code}', 材料名称='{material_name}', 日期='{file_date}', 页数='{page_count}'")
                     except ExcelFileNotFound:
+                        logging.warning(f"未找到Excel文件: 人名='{person_name}', 编号='{file_id}', 类号='{class_code}'")
                         material_name, file_date, page_count = '', '', ''
                     except Exception as e:
-                        logging.error(f"Excel信息读取失败: {str(e)}")
+                        logging.error(f"Excel信息读取失败: {str(e)}, 类号='{class_code}'")
                         material_name, file_date, page_count = '', '', ''
-                    
-                    # 插入到列表
-                    self.main_window.file_list.insert('', 'end', values=(
-                        file_id,
-                        person_name,
-                        class_code,
-                        material_name,
-                        file_name,
-                        file_date,
-                        page_count,
-                        file_path
-                    ))
-                else:
-                    # 处理完整的数据库记录
-                    # 假设是从数据库查询返回的结果，包含多个字段
-                    if len(file_data) >= 8:
-                        # 直接使用数据库返回的所有字段
-                        self.main_window.file_list.insert('', 'end', values=file_data)
-                    else:
-                        # 处理字段不足的情况
-                        values = list(file_data)
-                        # 确保至少有8个字段
-                        while len(values) < 8:
-                            values.append("")
-                        self.main_window.file_list.insert('', 'end', values=values)
                 
-        except Exception as e:
-            logging.error(f"更新文件列表失败: {str(e)}")
-            messagebox.showerror("错误", f"更新文件列表失败：{str(e)}")
+                # 插入到列表
+                self.main_window.file_list.insert('', 'end', values=(
+                    file_id,
+                    person_name,
+                    class_code,  # 使用完整类号格式
+                    material_name,
+                    file_name,
+                    file_date,
+                    page_count,
+                    file_path
+                ))
+                
+            except Exception as e:
+                logging.error(f"处理文件时出错: {str(e)}, 文件: {file}")
+        
+        # 更新状态栏
+        item_count = len(self.main_window.file_list.get_children())
+        if item_count > 0:
+            self.main_window.status_bar.show_message(f"找到 {item_count} 条记录", "info")
+        else:
+            self.main_window.status_bar.show_message("未找到匹配的记录", "warning")
     
     def on_file_double_click(self, event):
         """处理文件双击事件"""
@@ -347,10 +364,23 @@ class FileOperationManager:
         name = os.path.splitext(filename)[0]
         
         # 分类号通常是数字或数字-数字的格式
-        match = re.match(r'^(\d+(-\d+)?)', name)
-        if match:
-            return match.group(1)
-        return None
+        parts = name.split('-')
+        if not parts or not parts[0].isdigit():
+            return None
+        
+        # 构建完整类号 - 包括所有数字部分
+        class_parts = []
+        for part in parts:
+            if part.isdigit():
+                class_parts.append(part)
+            else:
+                break
+        
+        if not class_parts:
+            return None
+        
+        # 返回完整的类号格式，如 "1-1", "4-1-2"
+        return "-".join(class_parts)
     
     def open_install_directory(self):
         """打开程序安装目录"""

@@ -525,8 +525,28 @@ class MainWindow:
         # 添加右键菜单
         self.create_file_context_menu()
         
+        # 对文件列表进行排序 - 按类号的数字顺序排序
+        def get_sort_key(file):
+            # 如果文件长度大于等于3，使用类号(第3列)进行排序
+            if len(file) >= 3:
+                class_code = file[2] if file[2] else ""
+                # 将类号拆分为数字部分，并转换为整数进行排序
+                parts = class_code.split('-')
+                # 确保至少有一个部分
+                if not parts:
+                    return (0,)
+                # 尝试将每个部分转换为整数
+                try:
+                    return tuple(int(p) if p.isdigit() else 0 for p in parts)
+                except (ValueError, AttributeError):
+                    return (0,)
+            return (0,)
+        
+        # 对文件列表进行排序
+        sorted_files = sorted(files, key=get_sort_key)
+        
         # 添加文件到列表
-        for file in files:
+        for file in sorted_files:
             # 检查文件数据结构
             if len(file) < 2:
                 logging.warning(f"文件数据结构不完整: {file}")
@@ -536,55 +556,66 @@ class MainWindow:
                 # 提取文件信息
                 # 根据数据库查询结果解析数据
                 # person_files表结构: id, person_name, file_name, file_path, category_id, dir_name, file_id
-                if len(file) >= 7:  # 完整的person_files记录
+                if len(file) >= 7:
+                    # 完整的person_files记录
                     file_id = file[6] if file[6] else ""  # file_id
                     person_name = file[1] if file[1] else ""  # person_name
                     
                     # 从文件名中提取类号和材料名称
                     file_name = file[2] if file[2] else ""  # file_name
                     
-                    # 提取类号 - 应该是3-1, 4-1-1这种格式
+                    # 提取类号 - 应该是1-1, 4-1-1这种格式
                     class_code = ""
-                    material_name = ""
-                    date = ""
-                    page_count = ""
+                    material_name = ""  # 材料名称应该从Excel中读取，不硬编码
+                    date = ""  # 日期留空，应该从Excel中读取
+                    page_count = ""  # 页数留空，应该从Excel中读取
                     
-                    # 解析文件名，提取信息
-                    # 文件名格式可能是: 3-1-1-会议记录.pdf 或 3-1-会议记录.pdf
-                    if "-" in file_name:
-                        parts = file_name.split("-")
-                        
-                        # 提取类号部分
-                        if len(parts) >= 2:
-                            # 检查前两部分是否都是数字，构建类号
+                    # 使用完整类号格式 - 优先使用category_id中的类号
+                    class_code = file[4] if file[4] else ""  # category_id
+                    
+                    # 如果category_id为空，从文件名中提取完整类号
+                    if not class_code:
+                        class_code = self.extract_category_num(file_name)
+                    
+                    # 如果仍然为空，则使用默认格式
+                    if not class_code:
+                        # 从文件名中提取类号
+                        if "-" in file_name:
+                            parts = file_name.split("-")
+                            
+                            # 提取类号部分 (如 1-1, 4-1-1)
                             if parts[0].isdigit():
                                 class_code = parts[0]
                                 if len(parts) >= 2 and parts[1].isdigit():
                                     class_code += "-" + parts[1]
                                     if len(parts) >= 3 and parts[2].isdigit():
                                         class_code += "-" + parts[2]
-                        
-                        # 提取材料名称
-                        # 材料名称是类号后面的部分，直到文件扩展名前
-                        material_index = 0
-                        for i, part in enumerate(parts):
-                            if not part.isdigit() or i >= 3:
-                                material_index = i
-                                break
-                        
-                        if material_index > 0 and material_index < len(parts):
-                            # 获取材料名称部分
-                            material_name_parts = parts[material_index:]
-                            material_name_str = "-".join(material_name_parts)
-                            
+                        else:
+                            # 如果文件名中没有破折号，则尝试从文件名中提取类号
                             # 移除文件扩展名
-                            if "." in material_name_str:
-                                material_name = material_name_str.split(".")[0]
+                            base_name = os.path.splitext(file_name)[0]
+                            # 如果是纯数字，则直接作为类号
+                            if base_name.isdigit():
+                                class_code = base_name
                             else:
-                                material_name = material_name_str
+                                # 尝试提取开头的数字部分作为类号
+                                match = re.match(r'^(\d+)', base_name)
+                                if match:
+                                    class_code = match.group(1)
+                                else:
+                                    class_code = base_name
                     
-                    # 文件路径
+                    # 获取文件路径
                     file_path = file[3] if file[3] else ""  # file_path
+                    
+                    # 从Excel获取文件信息（材料名称、日期、页数）
+                    try:
+                        from src.utils.excel_utils import get_excel_info, ExcelFileNotFound
+                        if hasattr(self, 'import_root_dir') and self.import_root_dir and class_code:
+                            material_name, date, page_count, _ = get_excel_info(self.import_root_dir, person_name, file_id, class_code)
+                            logging.info(f"获取Excel信息成功: 类号='{class_code}', 材料名称='{material_name}', 日期='{date}', 页数='{page_count}'")
+                    except Exception as e:
+                        logging.error(f"获取Excel信息失败: {str(e)}")
                     
                 elif len(file) == 2:  # 简单的文件名和路径
                     file_name = file[0] if file[0] else ""
@@ -593,51 +624,70 @@ class MainWindow:
                     # 其他字段留空
                     file_id = ""
                     person_name = ""
-                    class_code = ""
-                    material_name = ""
-                    date = ""
-                    page_count = ""
+                    material_name = ""  # 材料名称应该从Excel中读取
+                    date = ""  # 日期留空
+                    page_count = ""  # 页数留空
                     
-                    # 尝试从文件名中提取类号和材料名称
-                    if "-" in file_name:
-                        parts = file_name.split("-")
-                        
-                        # 提取类号部分
-                        if len(parts) >= 2:
-                            # 检查前两部分是否都是数字，构建类号
+                    # 从文件名中提取完整类号
+                    class_code = self.extract_category_num(file_name)
+                    
+                    # 如果提取失败，尝试其他方法
+                    if not class_code:
+                        if "-" in file_name:
+                            parts = file_name.split("-")
+                            
+                            # 提取类号部分
                             if parts[0].isdigit():
                                 class_code = parts[0]
                                 if len(parts) >= 2 and parts[1].isdigit():
                                     class_code += "-" + parts[1]
                                     if len(parts) >= 3 and parts[2].isdigit():
                                         class_code += "-" + parts[2]
-                        
-                        # 提取材料名称
-                        material_index = 0
-                        for i, part in enumerate(parts):
-                            if not part.isdigit() or i >= 3:
-                                material_index = i
-                                break
-                        
-                        if material_index > 0 and material_index < len(parts):
-                            # 获取材料名称部分
-                            material_name_parts = parts[material_index:]
-                            material_name_str = "-".join(material_name_parts)
-                            
+                        else:
                             # 移除文件扩展名
-                            if "." in material_name_str:
-                                material_name = material_name_str.split(".")[0]
+                            base_name = os.path.splitext(file_name)[0]
+                            # 如果是纯数字，则直接作为类号
+                            if base_name.isdigit():
+                                class_code = base_name
                             else:
-                                material_name = material_name_str
+                                # 尝试提取开头的数字部分作为类号
+                                match = re.match(r'^(\d+)', base_name)
+                                if match:
+                                    class_code = match.group(1)
+                                else:
+                                    class_code = base_name
+                    
+                    # 从文件路径中提取人名和文件夹名
+                    dir_path = os.path.dirname(file_path)
+                    dir_name = os.path.basename(dir_path)
+                    
+                    # 提取编号 - 获取文件夹名中的数字前缀
+                    match = re.match(r'^(\d+)(.*)', dir_name)
+                    if match:
+                        file_id = match.group(1)
+                        # 处理姓名，去掉数字部分只保留人名
+                        person_name = match.group(2).strip()
+                    else:
+                        person_name = dir_name
+                    
+                    # 从Excel获取文件信息（材料名称、日期、页数）
+                    try:
+                        from src.utils.excel_utils import get_excel_info, ExcelFileNotFound
+                        if hasattr(self, 'import_root_dir') and self.import_root_dir and class_code:
+                            material_name, date, page_count, _ = get_excel_info(self.import_root_dir, person_name, file_id, class_code)
+                            logging.info(f"获取Excel信息成功: 类号='{class_code}', 材料名称='{material_name}', 日期='{date}', 页数='{page_count}'")
+                    except Exception as e:
+                        logging.error(f"获取Excel信息失败: {str(e)}")
+                
                 else:
                     # 尝试从现有数据中提取
                     file_id = file[0] if len(file) > 0 else ""
                     person_name = file[1] if len(file) > 1 else ""
                     class_code = file[2] if len(file) > 2 else ""
-                    material_name = file[3] if len(file) > 3 else ""
+                    material_name = file[3] if len(file) > 3 else ""  # 使用已有的材料名称
                     file_name = file[4] if len(file) > 4 else ""
-                    date = file[5] if len(file) > 5 else ""
-                    page_count = file[6] if len(file) > 6 else ""
+                    date = file[5] if len(file) > 5 else ""  # 使用已有的日期
+                    page_count = file[6] if len(file) > 6 else ""  # 使用已有的页数
                     file_path = file[7] if len(file) > 7 else ""
                 
                 # 确保文件路径是字符串
@@ -1560,6 +1610,88 @@ class MainWindow:
             else:
                 self.has_duplicate_names = False
             
+            # 检查当前是否有选中的分类
+            selected_items = self.tree.selection()
+            if selected_items:
+                # 有选中的分类，需要进行分类筛选
+                selected_item = selected_items[0]
+                selected_text = self.tree.item(selected_item)['text']
+                
+                # 获取分类代码
+                category_code = self.tree.item(selected_item)['tags'][0] if self.tree.item(selected_item)['tags'] else ""
+                
+                # 如果没有从tag中获取到分类代码，则从映射中获取
+                if not category_code:
+                    # 从显示文本中提取原始分类名称（去除数字前缀）
+                    if '、' in selected_text:
+                        category_name = selected_text.split('、', 1)[1]
+                    else:
+                        category_name = selected_text
+                    
+                    # 判断是一级分类还是二级分类
+                    parent_item = self.tree.parent(selected_item)
+                    is_secondary = parent_item != ''
+                    
+                    if not is_secondary and category_name in self.category_mapping:
+                        category_code = self.category_mapping[category_name]
+                    elif is_secondary:
+                        parent_text = self.tree.item(parent_item)['text']
+                        if '、' in parent_text:
+                            parent_name = parent_text.split('、', 1)[1]
+                        else:
+                            parent_name = parent_text
+                            
+                        if (parent_name, category_name) in self.category_mapping:
+                            category_code = self.category_mapping[(parent_name, category_name)]
+                
+                if category_code:
+                    logging.info(f"搜索时应用分类筛选: {selected_text} (代码: {category_code})")
+                    
+                    # 导入match_category_code函数
+                    try:
+                        from src.main import match_category_code
+                    except ImportError:
+                        # 如果导入失败，定义一个本地版本
+                        def match_category_code(row_category_code, selected_category_id):
+                            if not row_category_code:
+                                return False
+                            row_category_code = str(row_category_code).strip()
+                            selected_category_id = str(selected_category_id).strip()
+                            return row_category_code.startswith(f"{selected_category_id}-") or row_category_code == selected_category_id
+                    
+                    # 使用match_category_code函数过滤结果
+                    filtered_results = []
+                    for file in results:
+                        file_name = file[2] if len(file) > 2 else ""
+                        file_category_id = str(file[4]) if len(file) > 4 and file[4] is not None else ""  # 确保转换为字符串
+                        
+                        # 首先检查category_id字段是否匹配
+                        if file_category_id and match_category_code(file_category_id, category_code):
+                            filtered_results.append(file)
+                            continue
+                        
+                        # 然后从文件名中提取类号并检查是否匹配
+                        extracted_category = self.extract_category_num(file_name)
+                        if extracted_category and match_category_code(extracted_category, category_code):
+                            filtered_results.append(file)
+                            continue
+                        
+                        # 移除这个不精确的匹配条件，它会导致过度匹配
+                        # 例如，当category_code为"1"时，会匹配所有包含"1"的文件名
+                        # 如"4-1-1"、"5-1"等，而不仅仅是"1-"开头的文件
+                        # if category_code and file_name and str(category_code) in file_name:
+                        #     filtered_results.append(file)
+                    
+                    # 使用过滤后的结果
+                    results = filtered_results
+                    logging.info(f"应用分类筛选后的结果数量: {len(results)}")
+                    
+                    if not results:
+                        messagebox.showinfo("提示", f"未找到属于分类 '{selected_text}' 的档案")
+                        self.file_list.delete(*self.file_list.get_children())
+                        self.search_result_var.set("搜索结果: 0 个文件")
+                        return
+            
             # 更新文件列表
             self.update_file_list(results)
             
@@ -1586,19 +1718,27 @@ class MainWindow:
         if not filename or not isinstance(filename, str):
             return None
             
+        # 移除文件扩展名
+        base_name = os.path.splitext(filename)[0]
+        
         # 文件名格式可能是: 3-1-1-会议记录.pdf 或 3-1-会议记录.pdf
-        parts = filename.split('-')
-        if len(parts) < 2 or not parts[0].isdigit():
+        parts = base_name.split('-')
+        if not parts or not parts[0].isdigit():
             return None
             
-        # 构建类号
-        class_code = parts[0]
-        if len(parts) >= 2 and parts[1].isdigit():
-            class_code += "-" + parts[1]
-            if len(parts) >= 3 and parts[2].isdigit():
-                class_code += "-" + parts[2]
+        # 构建完整类号 - 包括所有数字部分
+        class_parts = []
+        for part in parts:
+            if part.isdigit():
+                class_parts.append(part)
+            else:
+                break
                 
-        return class_code
+        if not class_parts:
+            return None
+            
+        # 返回完整的类号格式，如 "1-1", "4-1-2"
+        return "-".join(class_parts)
 
     def on_category_selected(self, event):
         """处理分类选择事件"""
@@ -1629,178 +1769,193 @@ class MainWindow:
         else:
             category_name = selected_text
         
-        try:
-            if parent_item:  # 二级分类
+        logging.info(f"选择的分类: {selected_text}, 提取的分类名: {category_name}")
+        
+        # 清空文件列表
+        self.file_list.delete(*self.file_list.get_children())
+        
+        # 判断是一级分类还是二级分类
+        is_secondary = parent_item != ''
+        
+        # 获取分类代码
+        category_code = ""
+        
+        # 从树节点的tag中获取分类代码
+        category_code = self.tree.item(selected_item)['tags'][0] if self.tree.item(selected_item)['tags'] else ""
+        
+        # 如果没有从tag中获取到分类代码，则从映射中获取
+        if not category_code:
+            # 对于一级分类，直接从映射中获取
+            if not is_secondary and category_name in self.category_mapping:
+                category_code = self.category_mapping[category_name]
+            # 对于二级分类，需要找到父分类名称
+            elif is_secondary:
                 parent_text = self.tree.item(parent_item)['text']
-                
-                # 从父分类显示文本中提取原始名称
                 if '、' in parent_text:
-                    parent_category_name = parent_text.split('、', 1)[1]
+                    parent_name = parent_text.split('、', 1)[1]
                 else:
-                    parent_category_name = parent_text
+                    parent_name = parent_text
+                    
+                # 尝试从映射中获取二级分类代码
+                if (parent_name, category_name) in self.category_mapping:
+                    category_code = self.category_mapping[(parent_name, category_name)]
+        
+        logging.info(f"分类代码: {category_code}, 是否为二级分类: {is_secondary}")
+        
+        # 检查是否有搜索名称
+        if not hasattr(self, 'current_search_name') or not self.current_search_name:
+            self.status_var.set("请先输入姓名进行搜索")
+            return
+        
+        # 检查是否有重名但未提供ID
+        if hasattr(self, 'has_duplicate_names') and self.has_duplicate_names and not self.current_search_id:
+            self.status_var.set("检测到重名，请提供编号以区分")
+            return
+        
+        # 导入match_category_code函数
+        try:
+            from src.main import match_category_code
+        except ImportError:
+            # 如果导入失败，定义一个本地版本
+            def match_category_code(row_category_code, selected_category_id):
+                if not row_category_code:
+                    return False
+                row_category_code = str(row_category_code).strip()
+                selected_category_id = str(selected_category_id).strip()
+                return row_category_code.startswith(f"{selected_category_id}-") or row_category_code == selected_category_id
+        
+        # 构建SQL查询 - 获取所有符合搜索条件的文件，后续再进行分类筛选
+        files = []
+        
+        # 获取数据库连接和游标
+        cursor = self.db.cursor  # 使用数据库对象的游标
+        
+        try:
+            # 构建查询条件
+            conditions = []
+            params = []
+            
+            if self.current_search_name:
+                conditions.append("person_name LIKE ?")
+                params.append(f"%{self.current_search_name}%")
                 
-                category_key = (parent_category_name, category_name)
-                category_code = self.category_mapping.get(category_key)
+            if self.current_search_id:
+                conditions.append("file_id LIKE ?")
+                params.append(f"%{self.current_search_id}%")
+            
+            # 组合查询条件
+            query = """
+                SELECT 
+                    id, person_name, file_name, file_path, 
+                    category_id, dir_name, file_id
+                FROM person_files 
+                WHERE """ + " OR ".join(conditions) + """
+                ORDER BY person_name, file_name
+            """
+            
+            # 执行查询
+            cursor.execute(query, params)
+            all_files = cursor.fetchall()
+            
+            logging.info(f"搜索到的所有文件数量: {len(all_files)}")
+            
+            # 使用match_category_code函数过滤结果，只保留与选定类别匹配的文件
+            filtered_files = []
+            for file in all_files:
+                file_name = file[2] if len(file) > 2 else ""
+                file_category_id = str(file[4]) if len(file) > 4 and file[4] is not None else ""  # 确保转换为字符串
                 
-                logging.debug(f"二级分类选择: {parent_category_name} -> {category_name}")
-                logging.debug(f"二级分类编码: {category_code}")
+                # 首先检查category_id字段是否匹配
+                if file_category_id and match_category_code(file_category_id, category_code):
+                    filtered_files.append(file)
+                    continue
                 
-                if category_code:
-                    # 构建查询，精确匹配分类代码-开头
-                    query = '''
-                        SELECT 
-                            id, person_name, file_name, file_path, 
-                            category_id, dir_name, file_id
-                        FROM person_files 
-                        WHERE (
-                            file_name LIKE ? OR    -- 精确的分类代码-开头 (4-1-%)
-                            file_name LIKE ? OR    -- 带点的格式 (4.1.%)
-                            file_name LIKE ?       -- 简单格式 (4-%)
-                        )
-                        AND file_name NOT LIKE '~%'
-                        AND file_name NOT LIKE '.%'
-                        AND file_name LIKE '%.pdf'
-                    '''
-                    # 多种模式匹配
-                    category_parts = category_code.split('-')
-                    if len(category_parts) == 2:  # 二级分类，如 4-1
-                        main_code, sub_code = category_parts
-                        params = [
-                            f'{main_code}-{sub_code}-%',  # 4-1-%
-                            f'{main_code}.{sub_code}.%',  # 4.1.%
-                            f'{main_code}-%'              # 4-%
-                        ]
-                    else:
-                        params = [
-                            f'{category_code}-%',  # 任何以该编码开头的
-                            f'{category_code.replace("-", ".")}%',  # 替换-为.的格式
-                            f'{category_code.split("-")[0]}-%'  # 只匹配主分类
-                        ]
-                    
-                    # 检查是否有搜索条件
-                    if not (hasattr(self, 'current_search_name') and self.current_search_name):
-                        # 清空文件列表
-                        self.file_list.delete(*self.file_list.get_children())
-                        self.search_result_var.set("请先输入姓名进行搜索")
-                        return
-                    
-                    # 检查是否有重名但未输入编号的情况
-                    if hasattr(self, 'has_duplicate_names') and self.has_duplicate_names and \
-                       not (hasattr(self, 'current_search_id') and self.current_search_id):
-                        # 清空文件列表
-                        self.file_list.delete(*self.file_list.get_children())
-                        self.search_result_var.set("发现重名，请输入编号后重试")
-                        return
-                        
-                    # 添加人名过滤条件
-                    query += ' AND person_name = ?'
-                    params.append(self.current_search_name)
-                    
-                    # 如果有编号，添加编号过滤条件
-                    if hasattr(self, 'current_search_id') and self.current_search_id:
-                        query += ' AND file_id = ?'
-                        params.append(self.current_search_id)
-                    
-                    query += ' ORDER BY file_name'
-                    
-                    logging.debug(f"二级分类查询: {query}, 参数: {params}")
-                    
-                    self.db.cursor.execute(query, params)
-                    files = self.db.cursor.fetchall()
-                    
-                    # 记录查询结果
-                    logging.debug(f"二级分类查询结果数量: {len(files)}")
-                    if len(files) > 0:
-                        logging.debug(f"第一个结果: {files[0]}")
-                    
-                    self.update_file_list(files)
-                    
-                    # 更新状态栏显示搜索结果数量
-                    self.search_result_var.set(f"搜索结果: {len(files)} 个文件")
-                    
-                    logging.info(f"二级分类查询: {category_code}, 找到文件数量: {len(files)}")
-                else:
-                    logging.warning(f"未找到分类编码: {category_key}")
-            else:  # 一级分类
-                category_code = self.category_mapping.get(category_name)
+                # 然后从文件名中提取类号并检查是否匹配
+                extracted_category = self.extract_category_num(file_name)
+                if extracted_category and match_category_code(extracted_category, category_code):
+                    filtered_files.append(file)
+                    continue
                 
-                logging.debug(f"一级分类选择: {category_name}")
-                logging.debug(f"一级分类编码: {category_code}")
-                
-                if category_code:
-                    # 检查是否有子分类
-                    self.db.cursor.execute('''
-                        SELECT COUNT(*) 
-                        FROM categories 
-                        WHERE parent_category = ?
-                    ''', (category_name,))
+                # 移除这个不精确的匹配条件，它会导致过度匹配
+                # 例如，当category_code为"1"时，会匹配所有包含"1"的文件名
+                # 如"4-1-1"、"5-1"等，而不仅仅是"1-"开头的文件
+                # if category_code and file_name and str(category_code) in file_name:
+                #     filtered_files.append(file)
+            
+            logging.info(f"分类筛选后的文件数量: {len(filtered_files)}")
+            
+            # 记录过滤后的文件名
+            for i, file in enumerate(filtered_files[:5]):  # 只记录前5个文件
+                if len(file) > 2:
+                    logging.info(f"过滤后的文件 {i+1}: {file[2]}")
+            
+            # 如果没有找到匹配的文件
+            if not filtered_files:
+                self.status_var.set(f"未找到属于分类 '{selected_text}' 的文件")
+                return
+            
+            # 对于搜索到的文件，获取Excel信息并更新文件列表
+            excel_files = []
+            
+            for file in filtered_files:
+                try:
+                    file_id = file[6]  # file_id
+                    person_name = file[1]  # person_name
+                    file_name = file[2]  # file_name
                     
-                    has_subcategories = self.db.cursor.fetchone()[0] > 0
+                    # 从文件名中提取完整类号
+                    full_category_code = self.extract_category_num(file_name)
                     
-                    if has_subcategories:
-                        # 如果有子分类，不显示任何文件
-                        self.file_list.delete(*self.file_list.get_children())
-                        logging.info(f"一级分类有子分类，不显示文件")
-                    else:
-                        # 构建查询，精确匹配分类代码-开头
-                        query = '''
-                            SELECT 
-                                id, person_name, file_name, file_path, 
-                                category_id, dir_name, file_id
-                            FROM person_files 
-                            WHERE (
-                                file_name LIKE ? OR    -- 精确的分类代码-开头 (4-%)
-                                file_name LIKE ?       -- 点号分隔的格式 (4.%)
-                            )
-                            AND file_name NOT LIKE '~%'
-                            AND file_name NOT LIKE '.%'
-                            AND file_name LIKE '%.pdf'
-                        '''
-                        params = [f'{category_code}-%', f'{category_code}.%']
-                        
-                        # 检查是否有搜索条件
-                        if not (hasattr(self, 'current_search_name') and self.current_search_name):
-                            # 清空文件列表
-                            self.file_list.delete(*self.file_list.get_children())
-                            self.search_result_var.set("请先输入姓名进行搜索")
-                            return
-                        
-                        # 检查是否有重名但未输入编号的情况
-                        if hasattr(self, 'has_duplicate_names') and self.has_duplicate_names and \
-                           not (hasattr(self, 'current_search_id') and self.current_search_id):
-                            # 清空文件列表
-                            self.file_list.delete(*self.file_list.get_children())
-                            self.search_result_var.set("发现重名，请输入编号后重试")
-                            return
-                            
-                        # 添加人名过滤条件
-                        query += ' AND person_name = ?'
-                        params.append(self.current_search_name)
-                        
-                        # 如果有编号，添加编号过滤条件
-                        if hasattr(self, 'current_search_id') and self.current_search_id:
-                            query += ' AND file_id = ?'
-                            params.append(self.current_search_id)
-                        
-                        query += ' ORDER BY file_name'
-                        
-                        logging.debug(f"一级分类查询: {query}, 参数: {params}")
-                        
-                        self.db.cursor.execute(query, params)
-                        files = self.db.cursor.fetchall()
-                        
-                        # 记录查询结果
-                        logging.debug(f"一级分类查询结果数量: {len(files)}")
-                        if len(files) > 0:
-                            logging.debug(f"第一个结果: {files[0]}")
-                            
-                        self.update_file_list(files)
-                        
-                        logging.info(f"一级分类查询: {category_code}, 找到文件数量: {len(files)}")
-                
+                    # 如果无法从文件名提取，则使用默认格式
+                    if not full_category_code:
+                        # 如果是第四大类或第九大类，需要确保使用二级类号格式
+                        if category_code in ['4', '9']:
+                            # 默认使用 "类别-1-1" 格式（如 "4-1-1"）
+                            full_category_code = f"{category_code}-1-1"
+                        else:
+                            # 默认使用 "类别-1" 格式（如 "1-1"）
+                            full_category_code = f"{category_code}-1"
+                    
+                    logging.info(f"文件 {file_name} 提取的完整类号: {full_category_code}")
+                    
+                    # 使用完整类号替换简单类别号
+                    file_list = list(file)
+                    file_list[4] = full_category_code  # 替换category_id中的类号
+                    
+                    # 从Excel获取文件信息（材料名称、日期、页数）
+                    try:
+                        from src.utils.excel_utils import get_excel_info, ExcelFileNotFound
+                        if hasattr(self, 'import_root_dir') and self.import_root_dir and full_category_code:
+                            material_name, file_date, page_count, _ = get_excel_info(self.import_root_dir, person_name, file_id, full_category_code)
+                            if material_name or file_date or page_count:  # 如果获取到了信息
+                                logging.info(f"获取Excel信息成功: 类号='{full_category_code}', 材料名称='{material_name}', 日期='{file_date}', 页数='{page_count}'")
+                                # 更新材料名称、日期和页数
+                                if material_name:
+                                    file_list.append(material_name)
+                                if file_date:
+                                    file_list.append(file_date)
+                                if page_count:
+                                    file_list.append(page_count)
+                    except Exception as e:
+                        logging.error(f"获取Excel信息失败: {str(e)}")
+                    
+                    excel_files.append(tuple(file_list))
+                    
+                except Exception as e:
+                    logging.error(f"处理文件类号时出错: {str(e)}, 文件: {file}")
+                    excel_files.append(file)  # 出错时使用原始文件信息
+            
+            # 直接使用self.update_file_list方法更新文件列表
+            self.update_file_list(excel_files)
+            
+            # 更新状态栏
+            self.status_var.set(f"找到 {len(excel_files)} 个属于分类 '{selected_text}' 的文件")
+            self.search_result_var.set(f"搜索结果: {len(excel_files)} 个文件")
+            
         except Exception as e:
-            logging.error(f"分类查询失败: {str(e)}", exc_info=True)
-            messagebox.showerror("错误", f"获取分类文件失败：{str(e)}")
+            logging.error(f"查询分类文件时出错: {str(e)}")
+            self.status_var.set(f"查询失败: {str(e)}")
+        # 不需要关闭游标或连接，因为我们使用的是数据库对象的游标
 
     def update_category_tree(self):
         """更新分类树显示"""
@@ -2264,8 +2419,8 @@ class MainWindow:
                 chinese_num = chinese_numbers.get(main_num, str(main_num))
                 display_text = f"{chinese_num}、{category}"
                 
-                # 创建树节点
-                node_id = self.tree.insert('', 'end', text=display_text)
+                # 创建树节点，添加tags属性包含分类代码
+                node_id = self.tree.insert('', 'end', text=display_text, tags=[str(main_num)])
                 parent_nodes[category] = node_id
                 
                 # 添加一级分类映射
@@ -2304,12 +2459,13 @@ class MainWindow:
                     # 添加阿拉伯数字前缀，使用中文顿号"、"
                     display_text = f"{sub_num}、{category}"
                     
-                    # 创建树节点
-                    child_id = self.tree.insert(parent_nodes[parent_category], 'end', text=display_text)
+                    # 创建树节点，添加tags属性包含完整分类代码
+                    category_code = f"{main_num}-{sub_num}"
+                    child_id = self.tree.insert(parent_nodes[parent_category], 'end', text=display_text, tags=[category_code])
                     
                     # 添加二级分类映射
                     key = (parent_category, category)
-                    value = f"{main_num}-{sub_num}"
+                    value = category_code
                     self.category_mapping[key] = value
                     logging.debug(f"添加二级分类映射: {key} -> {value}")
             
@@ -2486,8 +2642,8 @@ class MainWindow:
         """创建状态栏"""
         try:
             # 创建状态栏框架
-            self.status_bar = ttk.Frame(self.root, height=20, relief=tk.SUNKEN)
-            self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+            self._status_bar = ttk.Frame(self.root, height=20, relief=tk.SUNKEN)
+            self._status_bar.pack(side=tk.BOTTOM, fill=tk.X)
             
             # 获取当前注册状态
             is_registered = hasattr(self, 'is_registered') and self.is_registered
@@ -2507,7 +2663,7 @@ class MainWindow:
             logging.info(f"状态栏初始化为: {status_text}")
             
             reg_status_label = ttk.Label(
-                self.status_bar, 
+                self._status_bar, 
                 textvariable=self.reg_status_var, 
                 anchor=tk.W,
                 relief=tk.SUNKEN,
@@ -2521,7 +2677,7 @@ class MainWindow:
             self.status_var = tk.StringVar()
             self.status_var.set("就绪")
             status_label = ttk.Label(
-                self.status_bar, 
+                self._status_bar, 
                 textvariable=self.status_var, 
                 anchor=tk.W,
                 relief=tk.SUNKEN,
@@ -2531,7 +2687,7 @@ class MainWindow:
             
             # 右侧版本信息标签
             version_label = ttk.Label(
-                self.status_bar,
+                self._status_bar,
                 text=f"版本: {self.version}",
                 anchor=tk.E,
                 relief=tk.SUNKEN,
@@ -2557,14 +2713,14 @@ class MainWindow:
                     status_text = f"已注册：{self.current_org}" if self.current_org else "已注册"
                     self.reg_status_var.set(status_text)
                     # 已注册状态显示为绿色
-                    for child in self.status_bar.winfo_children():
+                    for child in self._status_bar.winfo_children():
                         if isinstance(child, ttk.Label) and child.cget('textvariable') == str(self.reg_status_var):
                             child.configure(foreground='green')
                     logging.info(f"更新状态栏: {status_text}")
                 else:
                     self.reg_status_var.set("未注册")
                     # 未注册状态显示为红色
-                    for child in self.status_bar.winfo_children():
+                    for child in self._status_bar.winfo_children():
                         if isinstance(child, ttk.Label) and child.cget('textvariable') == str(self.reg_status_var):
                             child.configure(foreground='red')
                     logging.info("更新状态栏: 未注册")
@@ -2584,21 +2740,11 @@ class MainWindow:
         try:
             logging.info(f"开始更新界面，注册状态: {'已注册' if self.is_registered else '未注册'}")
             # 确保状态栏已创建
-            if not hasattr(self, 'status_bar'):
+            if not hasattr(self, '_status_bar'):
                 self.create_status_bar()
             
             # 更新状态栏显示
             self.update_status_bar()
-            
-            # 不再根据注册状态禁用注册菜单项，始终保持可用
-            # if hasattr(self, 'help_menu'):
-            #     try:
-            #         # 直接设置注册菜单项状态
-            #         state = tk.DISABLED if self.is_registered else tk.NORMAL
-            #         self.help_menu.entryconfigure("用户注册", state=state)
-            #         logging.info(f"更新注册菜单项状态: {'禁用' if self.is_registered else '启用'}")
-            #     except Exception as e:
-            #         logging.error(f"更新注册菜单项状态失败: {str(e)}")
             
             if not self.is_registered:
                 # 未注册状态：禁用大部分功能，保留帮助菜单和退出选项
@@ -2712,7 +2858,7 @@ class MainWindow:
                     self.reg_status_var.set(status_text)
                     
                     # 设置颜色为绿色
-                    for child in self.status_bar.winfo_children():
+                    for child in self._status_bar.winfo_children():
                         if isinstance(child, ttk.Label) and child.cget('textvariable') == str(self.reg_status_var):
                             child.configure(foreground='green')
                     
@@ -2853,3 +2999,34 @@ class MainWindow:
         except Exception as e:
             logging.exception(f"显示档案完整性检查对话框时出错: {str(e)}")
             messagebox.showerror("错误", f"打开档案完整性检查工具时出错: {str(e)}")
+
+    def show_message(self, message, message_type="info"):
+        """在状态栏显示消息
+        
+        Args:
+            message (str): 要显示的消息
+            message_type (str): 消息类型，可以是 'info', 'error', 'warning' 等
+        """
+        try:
+            if hasattr(self, 'status_var'):
+                self.status_var.set(message)
+                logging.debug(f"状态栏消息: {message} (类型: {message_type})")
+        except Exception as e:
+            logging.error(f"显示状态栏消息时出错: {str(e)}")
+            
+    # 为status_bar添加show_message方法，便于直接通过status_bar调用
+    @property
+    def status_bar(self):
+        """返回状态栏对象，并确保它有show_message方法"""
+        if not hasattr(self, '_status_bar'):
+            # 如果状态栏尚未创建，返回一个空对象
+            class EmptyStatusBar:
+                def show_message(self, message, message_type="info"):
+                    pass
+            return EmptyStatusBar()
+        
+        # 为状态栏添加show_message方法
+        if not hasattr(self._status_bar, 'show_message'):
+            self._status_bar.show_message = lambda message, message_type="info": self.show_message(message, message_type)
+        
+        return self._status_bar
