@@ -253,19 +253,15 @@ class MainWindow:
             
             # 管理员特有权限
             if is_admin:
-                # 启用清理数据库菜单
-                if hasattr(self, 'tools_menu'):
-                    self.tools_menu.entryconfigure("清理数据库", state=tk.NORMAL)
                 # 启用安全菜单
                 if hasattr(self, 'security_menu'):
                     self.security_menu.entryconfigure("档案完整性检查", state=tk.NORMAL)
+                    self.security_menu.entryconfigure("清理数据库", state=tk.NORMAL)
             else:
-                # 禁用清理数据库菜单
-                if hasattr(self, 'tools_menu'):
-                    self.tools_menu.entryconfigure("清理数据库", state=tk.DISABLED)
                 # 禁用安全菜单
                 if hasattr(self, 'security_menu'):
                     self.security_menu.entryconfigure("档案完整性检查", state=tk.DISABLED)
+                    self.security_menu.entryconfigure("清理数据库", state=tk.DISABLED)
 
     def setup_ui(self):
         """设置用户界面"""
@@ -345,23 +341,22 @@ class MainWindow:
         self.tools_menu.add_command(label="打开程序安装目录", command=self.open_install_directory)
         self.tools_menu.add_command(label="打开档案文件目录", command=self.open_archive_directory)
         self.tools_menu.add_command(label="打开数据库位置", command=self.open_database_location)
-        self.tools_menu.add_separator()
-        self.tools_menu.add_command(label="清理数据库", command=self.cleanup_database)
-        
+    
         # 安全菜单
         self.security_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="安全", menu=self.security_menu)
         self.security_menu.add_command(label="档案完整性检查", command=self.show_integrity_check)
-        
+        self.security_menu.add_command(label="清理数据库", command=self.cleanup_database)
+    
         # 日志菜单
         self.log_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="日志", menu=self.log_menu)
         self.log_menu.add_command(label="查看操作日志", command=self.show_operation_logs)
         self.log_menu.add_command(label="导出日志", command=self.export_logs)
-        
+    
         # 用户管理菜单（初始时不显示，管理员登录后再添加）
         self.user_menu = tk.Menu(menubar, tearoff=0)
-        
+    
         # 初始不添加到菜单栏，管理员登录后再添加
         self.user_menu_index = None
         
