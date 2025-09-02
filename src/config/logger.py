@@ -1,7 +1,19 @@
 import os
 import logging
+import sys
 from datetime import datetime
-from src.utils.paths import get_logs_dir
+
+# 使用兼容性导入
+try:
+    # 打包环境下的导入方式
+    if getattr(sys, 'frozen', False):
+        from utils.paths import get_logs_dir
+    else:
+        # 开发环境下的导入方式
+        from src.utils.paths import get_logs_dir
+except ImportError as e:
+    print(f"日志模块导入错误: {e}")
+    sys.exit(1)
 
 def setup_logger():
     """设置日志记录器"""
@@ -29,4 +41,4 @@ def setup_logger():
     logging.info("日志系统初始化完成")
 
 # 导出 setup_logger 函数
-__all__ = ['setup_logger'] 
+__all__ = ['setup_logger']
